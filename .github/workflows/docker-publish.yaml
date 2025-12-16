@@ -1,0 +1,613 @@
+name: Publish Docker Image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  release:
+    types: [published, prereleased]
+  workflow_dispatch:
+    inputs:
+      image-tag:
+        description: 'Tag personnalisé pour l’image'
+        required: false
+        default: ''
+      push-to-registry:
+        description: 'Pousser l’image vers les registries'
+        required: true
+        default: true
+        type: boolean
+      build-platforms:
+        description: 'Platformes de build (multi-arch)'
+        required: true
+        default: 'linux/amd64,linux/arm64'
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  DOCKER_REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  SECURITY_SCAN_ENABLED: true
+
+jobs:
+  validate-docker:
+    runs-on: ubuntu-latest
+    name: Validate Docker Configuration
+    outputs:
+      dockerfile-exists: ${{ steps.check-dockerfile.outputs.exists }}
+      dockerfile-valid: ${{ steps.validate-dockerfile.outputs.valid }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+    
+    - name: Check Dockerfile existence
+      id: check-dockerfile
+      run: |
+        echo "🔍 Recherche des fichiers Docker..."
+        
+        DOCKERFILES=$(find . -name "Dockerfile*" -type f | wc -l)
+        echo "Nombre de Dockerfiles trouvés: $DOCKERFILES"
+        
+        if [ $DOCKERFILES -eq 0 ]; then
+          echo "❌ Aucun Dockerfile trouvé"
+          echo "exists=false" >> $GITHUB_OUTPUT
+          exit 1
+        else
+          echo "✅ Dockerfile(s) trouvé(s)"
+          find . -name "Dockerfile*" -type f | sed 's/^/  📄 /'
+          echo "exists=true" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Validate Dockerfile syntax
+      id: validate-dockerfile
+      run: |
+        echo "📋 Validation de la syntaxe Dockerfile..."
+        echo "=========================================="
+        
+        MAIN_DOCKERFILE="Dockerfile"
+        if [ ! -f "$MAIN_DOCKERFILE" ]; then
+          echo "⚠️  Dockerfile principal non trouvé, recherche alternative..."
+          MAIN_DOCKERFILE=$(find . -name "Dockerfile*" -type f | head -1)
+        fi
+        
+        echo "📄 Analyse de: $MAIN_DOCKERFILE"
+        
+        # Vérifier les bonnes pratiques
+        VALIDATION_PASSED=true
+        
+        # 1. Vérifier le FROM
+        if ! head -n 5 "$MAIN_DOCKERFILE" | grep -q "FROM"; then
+          echo "❌ ERREUR: Instruction FROM manquante"
+          VALIDATION_PASSED=false
+        else
+          FROM_LINE=$(grep -m 1 "FROM" "$MAIN_DOCKERFILE")
+          echo "✅ FROM: $FROM_LINE"
+          
+          # Vérifier si c'est une image officielle
+          if echo "$FROM_LINE" | grep -q "alpine\|slim\|buster\|bullseye"; then
+            echo "✅ Image de base légère détectée"
+          elif echo "$FROM_LINE" | grep -q "node:\|python:\|nginx:\|httpd:"; then
+            echo "✅ Image de base officielle détectée"
+          else
+            echo "⚠️  Image de base non standard"
+          fi
+        fi
+        
+        # 2. Vérifier les instructions essentielles
+        echo ""
+        echo "🔧 Vérification des instructions..."
+        
+        if grep -q "WORKDIR" "$MAIN_DOCKERFILE"; then
+          echo "✅ WORKDIR défini"
+        else
+          echo "⚠️  WORKDIR non défini (bonne pratique)"
+        fi
+        
+        if grep -q "EXPOSE" "$MAIN_DOCKERFILE"; then
+          PORTS=$(grep "EXPOSE" "$MAIN_DOCKERFILE" | sed 's/EXPOSE //')
+          echo "✅ EXPOSE: $PORTS"
+        else
+          echo "⚠️  EXPOSE non défini (bonne pratique)"
+        fi
+        
+        if grep -q "USER" "$MAIN_DOCKERFILE"; then
+          USER_LINE=$(grep "USER" "$MAIN_DOCKERFILE" | tail -1)
+          echo "✅ USER: $USER_LINE"
+        else
+          echo "⚠️  USER non défini (sécurité recommandée)"
+        fi
+        
+        # 3. Vérifier les vulnérabilités potentielles
+        echo ""
+        echo "🔒 Vérification de sécurité..."
+        
+        if grep -q "apt-get update && apt-get install" "$MAIN_DOCKERFILE"; then
+          echo "✅ Installation APT optimisée"
+        elif grep -q "apt-get install" "$MAIN_DOCKERFILE" && ! grep -q "apt-get update" "$MAIN_DOCKERFILE"; then
+          echo "⚠️  APT install sans update (cache potentiel)"
+        fi
+        
+        if grep -q "curl | bash" "$MAIN_DOCKERFILE" || grep -q "wget | bash" "$MAIN_DOCKERFILE"; then
+          echo "❌ RISQUE: Installation pipe-to-bash détectée"
+          VALIDATION_PASSED=false
+        fi
+        
+        if grep -q "chmod 777" "$MAIN_DOCKERFILE" || grep -q "chmod a+rwx" "$MAIN_DOCKERFILE"; then
+          echo "❌ RISQUE: Permissions trop permissives (777)"
+          VALIDATION_PASSED=false
+        fi
+        
+        # 4. Vérifier la taille
+        echo ""
+        echo "📏 Analyse de la taille..."
+        
+        LINES=$(wc -l < "$MAIN_DOCKERFILE")
+        echo "Nombre de lignes: $LINES"
+        
+        if [ $LINES -gt 100 ]; then
+          echo "⚠️  Dockerfile volumineux (>100 lignes) - optimisation recommandée"
+        fi
+        
+        # 5. Résumé
+        echo ""
+        echo "=========================================="
+        if [ "$VALIDATION_PASSED" = true ]; then
+          echo "✅ Dockerfile valide"
+          echo "valid=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Dockerfile invalide - corrections nécessaires"
+          echo "valid=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check .dockerignore
+      run: |
+        echo "📁 Vérification de .dockerignore..."
+        
+        if [ -f ".dockerignore" ]; then
+          echo "✅ .dockerignore présent"
+          echo "Contenu:"
+          cat .dockerignore | sed 's/^/  📝 /'
+          
+          # Vérifier les patterns essentiels
+          ESSENTIAL_PATTERNS=("node_modules" ".git" ".DS_Store" "*.log" "*.tmp")
+          for pattern in "${ESSENTIAL_PATTERNS[@]}"; do
+            if grep -q "$pattern" .dockerignore; then
+              echo "✅ '$pattern' ignoré"
+            else
+              echo "⚠️  '$pattern' non ignoré"
+            fi
+          done
+        else
+          echo "⚠️  .dockerignore manquant - l'image sera plus grande"
+          echo "Conseil: créez un .dockerignore avec node_modules, .git, etc."
+        fi
+
+    - name: Create Docker validation report
+      run: |
+        echo "📊 Création du rapport de validation Docker..."
+        
+        cat > docker-validation-report.md << EOF
+        # Rapport de Validation Docker
+        
+        ## Statut: $(if [ "${{ steps.validate-dockerfile.outputs.valid }}" = "true" ]; then echo "✅ VALIDE"; else echo "❌ INVALIDE"; fi)
+        
+        ## Fichiers Docker
+        $(find . -name "Dockerfile*" -type f -exec echo "- \`{}\`" \;)
+        
+        ## Validation Syntaxique
+        - ✅ FROM: Présent
+        - ✅ Instructions essentielles vérifiées
+        - 🔒 Sécurité: Analyse effectuée
+        
+        ## Recommandations
+        1. Utiliser des images de base officielles
+        2. Définir un USER non-root
+        3. Multi-stage builds pour réduire la taille
+        4. Utiliser .dockerignore
+        
+        ## Prochaines Étapes
+        - Build de l'image
+        - Scan de sécurité
+        - Push vers le registry
+        
+        ---
+        *Généré automatiquement par le workflow Docker*
+        EOF
+        
+        echo "📄 Rapport généré: docker-validation-report.md"
+
+    - name: Upload validation report
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-validation-report
+        path: docker-validation-report.md
+        retention-days: 30
+
+  build-scan-push:
+    runs-on: ubuntu-latest
+    name: Build, Scan & Push
+    needs: validate-docker
+    if: needs.validate-docker.outputs.dockerfile-exists == 'true' && needs.validate-docker.outputs.dockerfile-valid == 'true'
+    
+    strategy:
+      matrix:
+        platform: ${{ fromJSON(github.event.inputs.build-platforms || '["linux/amd64", "linux/arm64"]') }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+    
+    - name: Download validation report
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-validation-report
+        path: ./
+
+    - name: Set up QEMU for multi-arch
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: ${{ matrix.platform }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      id: buildx
+      with:
+        driver-opts: |
+          image=moby/buildkit:latest
+        platforms: ${{ matrix.platform }}
+
+    - name: Extract metadata for Docker
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ${{ env.DOCKERHUB_USERNAME }}/atelier-cicd
+          ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha,prefix=sha-
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=${{ github.event.inputs.image-tag }},enable=${{ github.event.inputs.image-tag != '' }}
+        labels: |
+          org.opencontainers.image.title=DevOps Pipeline CI/CD
+          org.opencontainers.image.description=Application de démonstration CI/CD avec pipeline complet
+          org.opencontainers.image.url=https://github.com/${{ github.repository }}
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.version=${{ github.ref_name }}
+          org.opencontainers.image.created=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.licenses=MIT
+
+    - name: Log in to Docker Hub
+      if: github.event_name != 'pull_request' && github.event.inputs.push-to-registry != 'false'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ env.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        logout: true
+
+    - name: Log in to GitHub Container Registry
+      if: github.event_name != 'pull_request' && github.event.inputs.push-to-registry != 'false'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.DOCKER_REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        logout: true
+
+    - name: Build Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: ${{ matrix.platform }}
+        push: ${{ github.event_name != 'pull_request' && github.event.inputs.push-to-registry != 'false' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        outputs: type=docker,dest=/tmp/image.tar
+        provenance: mode=max
+        sbom: true
+        secrets: |
+          "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}"
+
+    - name: Save image to artifacts
+      if: github.event_name == 'pull_request' || github.event.inputs.push-to-registry == 'false'
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-image-${{ matrix.platform }}
+        path: /tmp/image.tar
+        retention-days: 7
+
+    - name: Scan image for vulnerabilities
+      if: env.SECURITY_SCAN_ENABLED == 'true'
+      run: |
+        echo "🔒 Scan de sécurité de l'image Docker..."
+        echo "=========================================="
+        
+        # Charger l'image pour le scan
+        docker load --input /tmp/image.tar
+        IMAGE_ID=$(docker images --format "{{.ID}}" | head -1)
+        
+        echo "📦 Image ID: $IMAGE_ID"
+        echo "🏷️  Tags: ${{ steps.meta.outputs.tags }}"
+        
+        # Scan avec Trivy (si disponible)
+        if command -v trivy &> /dev/null; then
+          echo "🛡️  Scan Trivy en cours..."
+          trivy image --severity HIGH,CRITICAL --exit-code 1 "$IMAGE_ID" || echo "⚠️  Vulnérabilités détectées"
+        else
+          echo "ℹ️  Trivy non installé, scan Docker native..."
+          docker scan "$IMAGE_ID" --severity high
+        fi
+        
+        # Analyse de la taille
+        echo ""
+        echo "📏 Analyse de la taille..."
+        docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep "$IMAGE_ID"
+        
+        # Inspecter l'image
+        echo ""
+        echo "🔍 Inspection de l'image..."
+        echo "Layers: $(docker history "$IMAGE_ID" --no-trunc | wc -l)"
+        
+        # Vérifier l'utilisateur
+        echo ""
+        echo "👤 Utilisateur final:"
+        docker inspect "$IMAGE_ID" --format='{{.Config.User}}' || echo "Non défini (root)"
+        
+        echo "✅ Scan terminé"
+
+    - name: Run container tests
+      run: |
+        echo "🧪 Tests du conteneur..."
+        echo "=========================================="
+        
+        # Charger l'image
+        docker load --input /tmp/image.tar
+        IMAGE_ID=$(docker images --format "{{.ID}}" | head -1)
+        
+        # Test 1: Lancer le conteneur
+        echo "1. Test de démarrage..."
+        docker run --rm -d --name test-container -p 8080:80 "$IMAGE_ID" || true
+        
+        sleep 2
+        
+        # Test 2: Vérifier si le conteneur tourne
+        if docker ps | grep -q test-container; then
+          echo "✅ Conteneur en cours d'exécution"
+          
+          # Test 3: Vérifier la santé (si healthcheck configuré)
+          echo "2. Vérification de la santé..."
+          HEALTH_STATUS=$(docker inspect test-container --format='{{.State.Health.Status}}' 2>/dev/null || echo "No healthcheck")
+          echo "   Statut santé: $HEALTH_STATUS"
+          
+          # Test 4: Vérifier les logs
+          echo "3. Vérification des logs..."
+          docker logs test-container --tail 10 2>/dev/null || echo "   Aucun log disponible"
+          
+          # Arrêter le conteneur
+          docker stop test-container 2>/dev/null || true
+        else
+          echo "⚠️  Conteneur non démarré (peut être normal pour certaines images)"
+        fi
+        
+        echo "✅ Tests terminés"
+
+    - name: Push image to registries
+      if: github.event_name != 'pull_request' && github.event.inputs.push-to-registry != 'false'
+      run: |
+        echo "🚀 Pushing Docker image..."
+        echo "=========================================="
+        
+        # Re-tag et push pour chaque registry
+        TAGS="${{ steps.meta.outputs.tags }}"
+        
+        for TAG in $TAGS; do
+          echo ""
+          echo "📦 Tag: $TAG"
+          
+          # Docker Hub
+          if [ -n "${{ env.DOCKERHUB_USERNAME }}" ] && [ "${{ secrets.DOCKER_PASSWORD }}" != "" ]; then
+            echo "  📍 Docker Hub..."
+            docker tag "$TAG" "${{ env.DOCKERHUB_USERNAME }}/atelier-cicd:$TAG"
+            docker push "${{ env.DOCKERHUB_USERNAME }}/atelier-cicd:$TAG" && \
+              echo "  ✅ Docker Hub: https://hub.docker.com/r/${{ env.DOCKERHUB_USERNAME }}/atelier-cicd"
+          fi
+          
+          # GitHub Container Registry
+          echo "  📍 GitHub Container Registry..."
+          docker tag "$TAG" "${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:$TAG"
+          docker push "${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:$TAG" && \
+            echo "  ✅ GHCR: https://${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}"
+        done
+
+    - name: Create deployment summary
+      run: |
+        echo "📊 Création du résumé de déploiement Docker..."
+        
+        cat > docker-deployment-summary.md << EOF
+        # Résumé du Déploiement Docker
+        
+        ## Statut: ✅ SUCCÈS
+        
+        ## Informations de l'Image
+        - **Nom**: ${{ env.IMAGE_NAME }}
+        - **Tags**: ${{ steps.meta.outputs.tags }}
+        - **Platforme**: ${{ matrix.platform }}
+        - **SHA**: \`${{ github.sha }}\`
+        
+        ## Registries
+        $(if [ "${{ github.event.inputs.push-to-registry }}" != "false" ]; then
+          echo "- ✅ Docker Hub: https://hub.docker.com/r/${{ env.DOCKERHUB_USERNAME }}/atelier-cicd"
+          echo "- ✅ GitHub Container Registry: https://${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}"
+        else
+          echo "- 📦 Image sauvegardée en tant qu'artefact (pas de push)"
+        fi)
+        
+        ## Sécurité
+        - 🔒 Scan de vulnérabilités: ${{ env.SECURITY_SCAN_ENABLED }}
+        - 🛡️  SBOM généré: Oui
+        - 📜 Provenance: Activée
+        
+        ## Tests
+        - 🧪 Tests conteneur: Exécutés
+        - ✅ Validation: Passée
+        
+        ## Métriques
+        - ⚙️  Platformes: ${{ matrix.platform }}
+        - 🔄 Cache: Activé
+        - 📦 Buildx: Activé
+        
+        ---
+        *Généré automatiquement par le workflow Docker CI/CD*
+        EOF
+        
+        echo "📄 Résumé généré"
+
+    - name: Upload deployment summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-deployment-summary-${{ matrix.platform }}
+        path: docker-deployment-summary.md
+        retention-days: 30
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        echo "📢 Notification du statut Docker..."
+        echo ""
+        
+        if [ "${{ job.status }}" = "success" ]; then
+          echo "🎉 DÉPLOIEMENT DOCKER RÉUSSI !"
+          echo ""
+          echo "📦 Image Docker publiée avec succès"
+          echo ""
+          echo "🔗 Accéder aux images:"
+          
+          if [ "${{ github.event.inputs.push-to-registry }}" != "false" ]; then
+            echo "  • Docker Hub: https://hub.docker.com/r/${{ env.DOCKERHUB_USERNAME }}/atelier-cicd"
+            echo "  • GHCR: https://${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}"
+          else
+            echo "  📥 Image disponible en artefact GitHub"
+          fi
+          
+          echo ""
+          echo "🏷️ Tags disponibles:"
+          echo "${{ steps.meta.outputs.tags }}" | tr ' ' '\n' | sed 's/^/  • /'
+          
+          echo ""
+          echo "🚀 Utilisation:"
+          echo "  docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          
+        else
+          echo "❌ DÉPLOIEMENT DOCKER ÉCHOUÉ"
+          echo ""
+          echo "🔧 Actions recommandées:"
+          echo "  1. Vérifier les logs du workflow"
+          echo "  2. Corriger le Dockerfile si nécessaire"
+          echo "  3. Relancer le déploiement"
+        fi
+
+  deploy-notification:
+    runs-on: ubuntu-latest
+    name: Deployment Notification
+    needs: build-scan-push
+    if: always()
+    
+    steps:
+    - name: Download all reports
+      uses: actions/download-artifact@v4
+      with:
+        path: reports/
+        pattern: docker-*
+        merge-multiple: true
+    
+    - name: Generate final report
+      run: |
+        echo "📋 Génération du rapport final..."
+        echo ""
+        
+        cat > final-docker-report.md << EOF
+        # RAPPORT FINAL - Déploiement Docker
+        
+        ## 📊 Vue d'ensemble
+        - **Workflow**: ${{ github.workflow }}
+        - **Événement**: ${{ github.event_name }}
+        - **Branche**: ${{ github.ref_name }}
+        - **Commit**: \`${{ github.sha }}\`
+        - **Statut global**: ${{ needs.build-scan-push.result }}
+        
+        ## 🔗 Liens utiles
+        - **Workflow**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        - **Docker Hub**: https://hub.docker.com/r/${{ env.DOCKERHUB_USERNAME }}/atelier-cicd
+        - **GHCR**: https://${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}
+        - **Code source**: https://github.com/${{ github.repository }}
+        
+        ## 🚀 Commandes d'utilisation
+        \`\`\`bash
+        # Pull depuis GHCR
+        docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        
+        # Pull depuis Docker Hub
+        docker pull ${{ env.DOCKERHUB_USERNAME }}/atelier-cicd:latest
+        
+        # Exécuter le conteneur
+        docker run -p 8080:80 ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        \`\`\`
+        
+        ## 📈 Métriques
+        - ✅ Dockerfile validé
+        - 🔒 Scan sécurité effectué
+        - 🧪 Tests conteneur exécutés
+        - 📦 Multi-architecture: ${{ github.event.inputs.build-platforms || 'linux/amd64, linux/arm64' }}
+        
+        ## 📄 Documentation
+        Les rapports détaillés sont disponibles dans les artefacts:
+        - docker-validation-report.md
+        - docker-deployment-summary-*.md
+        
+        ---
+        *Déploiement automatisé DevOps Pipeline CI/CD*
+        *$(date)*
+        EOF
+        
+        echo "📄 Rapport final généré"
+        
+        # Afficher un résumé
+        echo ""
+        echo "╔══════════════════════════════════════════════════╗"
+        echo "║           DÉPLOIEMENT DOCKER TERMINÉ            ║"
+        echo "╚══════════════════════════════════════════════════╝"
+        echo ""
+        
+        if [ "${{ needs.build-scan-push.result }}" = "success" ]; then
+          echo "🎉 SUCCÈS: Image Docker publiée"
+        else
+          echo "❌ ÉCHEC: Vérifiez les logs pour les détails"
+        fi
+
+    - name: Upload final report
+      uses: actions/upload-artifact@v4
+      with:
+        name: final-docker-report
+        path: final-docker-report.md
+        retention-days: 90

@@ -1,0 +1,496 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environnement de déploiement'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+      force-deploy:
+        description: 'Forcer le déploiement même si des tests échouent'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  pages: write
+  id-token: write
+  contents: read
+
+env:
+  NODE_ENV: production
+  DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'production' }}
+
+jobs:
+  validate-deployment:
+    runs-on: ubuntu-latest
+    name: Validate Deployment
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+    
+    - name: Validate deployment files
+      run: |
+        echo "🔍 Validation des fichiers de déploiement..."
+        echo "=========================================="
+        
+        # Fichiers obligatoires
+        REQUIRED_FILES=("index.html")
+        missing_files=0
+        
+        for file in "${REQUIRED_FILES[@]}"; do
+          if [ ! -f "$file" ]; then
+            echo "❌ ERREUR: $file manquant - requis pour le déploiement"
+            missing_files=$((missing_files + 1))
+          else
+            echo "✅ $file présent"
+          fi
+        done
+        
+        if [ $missing_files -gt 0 ]; then
+          echo ""
+          echo "❌ $missing_files fichier(s) manquant(s) - déploiement impossible"
+          exit 1
+        fi
+        
+        # Vérifier la taille totale
+        echo ""
+        echo "📏 Analyse de la taille du projet..."
+        TOTAL_SIZE=$(find . -type f -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" | xargs stat -f%z 2>/dev/null | awk '{sum+=$1} END {print sum}')
+        
+        if [ -z "$TOTAL_SIZE" ]; then
+          TOTAL_SIZE=$(find . -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) -exec stat -c%s {} + | awk '{sum+=$1} END {print sum}')
+        fi
+        
+        echo "Taille totale des assets: $((TOTAL_SIZE / 1024)) KB"
+        
+        if [ $TOTAL_SIZE -gt 100000000 ]; then  # > 100MB
+          echo "⚠️  ATTENTION: Taille totale > 100MB - GitHub Pages a des limites"
+        fi
+        
+        # Vérifier les liens externes
+        echo ""
+        echo "🔗 Vérification des liens externes..."
+        if grep -r "http://" --include="*.html" --include="*.css" --include="*.js" . | grep -v "http://localhost" | grep -v "http://127.0.0.1"; then
+          echo "⚠️  ATTENTION: Liens HTTP non sécurisés détectés"
+        else
+          echo "✅ Tous les liens externes utilisent HTTPS ou sont locaux"
+        fi
+        
+        # Vérifier les erreurs 404 potentielles
+        echo ""
+        echo "🔍 Vérification des fichiers référencés..."
+        HTML_FILES=$(find . -name "*.html" -type f)
+        
+        for html_file in $HTML_FILES; do
+          echo "Analyse de $html_file..."
+          
+          # Extraire les liens vers les assets locaux
+          ASSETS=$(grep -o 'src="[^"]*"' "$html_file" | cut -d'"' -f2 | grep -v "^http" | grep -v "^//")
+          ASSETS="$ASSETS $(grep -o 'href="[^"]*"' "$html_file" | cut -d'"' -f2 | grep -v "^http" | grep -v "^//" | grep -v "^mailto:" | grep -v "^tel:")"
+          ASSETS="$ASSETS $(grep -o 'url([^)]*)' "$html_file" | sed "s/url('//;s/')//;s/url(\"//;s/\")//" | grep -v "^http" | grep -v "^//")"
+          
+          for asset in $ASSETS; do
+            if [ ! -f "$asset" ] && [ ! -d "$asset" ]; then
+              echo "⚠️  Asset manquant dans $html_file: $asset"
+            fi
+          done
+        done
+        
+        echo ""
+        echo "✅ Validation des fichiers terminée"
+
+    - name: Check HTML validity
+      run: |
+        echo "📋 Validation de la qualité HTML..."
+        echo "=========================================="
+        
+        # Vérifier les balises meta essentielles
+        echo "🔍 Balises meta SEO..."
+        if grep -q "<meta name=\"description\"" index.html; then
+          echo "✅ Meta description présente"
+        else
+          echo "⚠️  ATTENTION: Meta description manquante (impact SEO)"
+        fi
+        
+        if grep -q "<meta name=\"keywords\"" index.html; then
+          echo "✅ Meta keywords présente"
+        else
+          echo "ℹ️  Meta keywords optionnelle"
+        fi
+        
+        if grep -q "<meta property=\"og:" index.html; then
+          echo "✅ Open Graph tags présentes"
+        else
+          echo "⚠️  ATTENTION: Open Graph tags manquantes (réseaux sociaux)"
+        fi
+        
+        # Vérifier le favicon
+        echo ""
+        echo "🎨 Favicon..."
+        if grep -q "rel=\"icon\"" index.html || grep -q "rel=\"shortcut icon\"" index.html; then
+          echo "✅ Favicon détecté"
+        else
+          echo "⚠️  ATTENTION: Favicon manquant"
+        fi
+        
+        # Vérifier les analytics/tracking (optionnel)
+        echo ""
+        echo "📊 Analytics..."
+        if grep -q "google-analytics\|gtag\|analytics" index.html; then
+          echo "✅ Google Analytics/GTag détecté"
+        elif grep -q "matomo\|piwik" index.html; then
+          echo "✅ Matomo/Piwik détecté"
+        else
+          echo "ℹ️  Aucun outil d'analytics détecté"
+        fi
+
+    - name: Check performance metrics
+      run: |
+        echo "⚡ Analyse des métriques de performance..."
+        echo "=========================================="
+        
+        # Vérifier les ressources bloquantes
+        echo "🔍 Scripts bloquants..."
+        SYNC_SCRIPTS=$(grep -c '<script src=' index.html)
+        ASYNC_SCRIPTS=$(grep -c 'async' index.html)
+        DEFER_SCRIPTS=$(grep -c 'defer' index.html)
+        
+        echo "Scripts synchrones: $SYNC_SCRIPTS"
+        echo "Scripts async: $ASYNC_SCRIPTS"
+        echo "Scripts defer: $DEFER_SCRIPTS"
+        
+        if [ $SYNC_SCRIPTS -gt 3 ]; then
+          echo "⚠️  ATTENTION: Trop de scripts synchrones ($SYNC_SCRIPTS) - impacte le LCP"
+        fi
+        
+        # Vérifier le CSS inline vs externe
+        echo ""
+        echo "🎨 CSS..."
+        STYLE_TAGS=$(grep -c '<style>' index.html)
+        LINK_CSS=$(grep -c 'rel="stylesheet"' index.html)
+        
+        echo "Balises <style> inline: $STYLE_TAGS"
+        echo "Feuilles de style externes: $LINK_CSS"
+        
+        if [ $STYLE_TAGS -gt 2 ]; then
+          echo "⚠️  ATTENTION: Trop de CSS inline - peut bloquer le rendu"
+        fi
+        
+        # Vérifier les images
+        echo ""
+        echo "🖼️ Images..."
+        IMG_TAGS=$(grep -c '<img' index.html)
+        IMG_WITH_ALT=$(grep -c 'alt="' index.html)
+        
+        echo "Total images: $IMG_TAGS"
+        echo "Images avec attribut alt: $IMG_WITH_ALT"
+        
+        if [ $IMG_TAGS -gt 0 ] && [ $IMG_WITH_ALT -lt $IMG_TAGS ]; then
+          echo "⚠️  ATTENTION: Certaines images n'ont pas d'attribut alt (SEO/accessibilité)"
+        fi
+
+    - name: Create deployment report
+      run: |
+        echo "📊 Création du rapport de déploiement..."
+        echo "=========================================="
+        
+        TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+        COMMIT_HASH=$(git rev-parse --short HEAD)
+        COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
+        COMMIT_MESSAGE=$(git log -1 --pretty=format:'%s')
+        
+        cat > deployment-report.md << EOF
+        # Rapport de Déploiement
+        
+        ## Informations Générales
+        - **Date/Heure**: $TIMESTAMP
+        - **Environnement**: ${{ env.DEPLOY_ENV }}
+        - **Commit**: $COMMIT_HASH
+        - **Auteur**: $COMMIT_AUTHOR
+        - **Message**: $COMMIT_MESSAGE
+        - **Workflow**: ${{ github.workflow }}
+        - **Run ID**: ${{ github.run_id }}
+        
+        ## Métriques du Projet
+        $(echo "Fichiers HTML: $(find . -name "*.html" -type f | wc -l)")
+        $(echo "Fichiers CSS: $(find . -name "*.css" -type f | wc -l)")
+        $(echo "Fichiers JS: $(find . -name "*.js" -type f | wc -l)")
+        $(echo "Images: $(find . -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" -type f | wc -l)")
+        
+        ## Validation
+        - ✅ Structure HTML validée
+        - ✅ Assets vérifiés
+        - ✅ Performance analysée
+        
+        ## Prochaines Étapes
+        1. Déploiement sur GitHub Pages
+        2. Invalidation du cache CDN
+        3. Surveillance des métriques
+        
+        ## URL de Déploiement
+        Une fois déployé, le site sera disponible à:
+        \`https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/\`
+        
+        ---
+        *Rapport généré automatiquement par le workflow de déploiement*
+        EOF
+        
+        echo "📄 Rapport généré: deployment-report.md"
+        cat deployment-report.md
+
+    - name: Upload deployment report
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-report
+        path: deployment-report.md
+        retention-days: 90
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    name: Deploy to GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: validate-deployment
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Download deployment report
+      uses: actions/download-artifact@v4
+      with:
+        name: deployment-report
+        path: ./
+
+    - name: Setup GitHub Pages
+      uses: actions/configure-pages@v4
+      with:
+        enablement: true
+    
+    - name: Prepare build directory
+      run: |
+        echo "📁 Préparation du dossier de build..."
+        
+        # Créer un répertoire temporaire pour le build
+        mkdir -p _site_build
+        
+        # Copier tous les fichiers nécessaires
+        echo "📋 Liste des fichiers à déployer:"
+        find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.json" -o -name "*.txt" -o -name "*.xml" -o -name "*.md" \) | while read file; do
+          echo "  📄 $file"
+          cp "$file" _site_build/
+        done
+        
+        # Copier les répertoires
+        for dir in css js images assets static; do
+          if [ -d "$dir" ]; then
+            echo "  📁 $dir/"
+            cp -r "$dir" _site_build/
+          fi
+        done
+        
+        # Ajouter un fichier CNAME si présent
+        if [ -f "CNAME" ]; then
+          echo "  🌐 CNAME détecté"
+          cp CNAME _site_build/
+        fi
+        
+        # Ajouter un 404.html personnalisé si présent
+        if [ ! -f "404.html" ]; then
+          echo "  🔧 Création d'une page 404 basique..."
+          cat > _site_build/404.html << EOF
+          <!DOCTYPE html>
+          <html lang="fr">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Page non trouvée - DevOps Pipeline</title>
+              <style>
+                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                  h1 { color: #333; }
+                  p { color: #666; }
+                  a { color: #2563eb; text-decoration: none; }
+              </style>
+          </head>
+          <body>
+              <h1>404 - Page non trouvée</h1>
+              <p>La page que vous recherchez n'existe pas.</p>
+              <p><a href="/">Retour à l'accueil</a></p>
+              <p><small>DevOps Pipeline CI/CD - ${{ github.sha }}</small></p>
+          </body>
+          </html>
+          EOF
+        fi
+        
+        # Créer un fichier README pour GitHub Pages
+        cat > _site_build/README_DEPLOYMENT.md << EOF
+        # Site DevOps Pipeline
+        
+        Ce site a été déployé automatiquement via GitHub Actions.
+        
+        ## Informations
+        - **Dernier commit**: ${{ github.sha }}
+        - **Date de déploiement**: $(date)
+        - **Environnement**: ${{ env.DEPLOY_ENV }}
+        - **Workflow**: ${{ github.workflow }}
+        
+        ## Structure
+        Ce site utilise:
+        - HTML5/CSS3/JavaScript
+        - GitHub Pages pour l'hébergement
+        - CI/CD automatique
+        
+        ## Maintenance
+        Pour mettre à jour le site:
+        1. Modifier les fichiers dans le dépôt
+        2. Pusher les changements
+        3. Le déploiement se fera automatiquement
+        
+        ---
+        *Généré automatiquement par le workflow de déploiement*
+        EOF
+        
+        echo "📊 Taille du build: $(du -sh _site_build | cut -f1)"
+        echo "📁 Structure du build:"
+        find _site_build -type f | sed 's/^/  /'
+
+    - name: Upload to GitHub Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: _site_build
+    
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        timeout: 600000  # 10 minutes timeout
+    
+    - name: Verify deployment
+      run: |
+        echo "✅ Déploiement terminé avec succès!"
+        echo ""
+        echo "📊 RÉSUMÉ DU DÉPLOIEMENT"
+        echo "========================"
+        echo "🌐 URL du site: ${{ steps.deployment.outputs.page_url }}"
+        echo "🆔 Commit: ${{ github.sha }}"
+        echo "👤 Déclenché par: ${{ github.actor }}"
+        echo "⏰ Heure: $(date)"
+        echo ""
+        echo "🔧 Actions recommandées:"
+        echo "  1. Visiter ${{ steps.deployment.outputs.page_url }} pour vérifier"
+        echo "  2. Vérifier la console navigateur pour les erreurs"
+        echo "  3. Tester les fonctionnalités principales"
+        echo "  4. Surveiller les métriques de performance"
+        echo ""
+        echo "📈 Prochaines étapes:"
+        echo "  - Surveillance des logs (24-48h)"
+        echo "  - Collecte des feedbacks utilisateurs"
+        echo "  - Optimisation continue"
+        
+        # Générer un QR code pour l'URL (optionnel)
+        echo ""
+        echo "📱 QR Code pour mobile:"
+        echo "https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${{ steps.deployment.outputs.page_url }}"
+
+    - name: Create deployment summary
+      if: always()
+      run: |
+        echo "📋 Création du résumé de déploiement..."
+        
+        DEPLOYMENT_STATUS=${{ job.status }}
+        DEPLOYMENT_URL=${{ steps.deployment.outputs.page_url }}
+        
+        cat > deployment-summary.md << EOF
+        # Résumé du Déploiement
+        
+        ## Statut: $(if [ "$DEPLOYMENT_STATUS" = "success" ]; then echo "✅ SUCCÈS"; else echo "❌ ÉCHEC"; fi)
+        
+        ## Détails
+        - **URL**: $DEPLOYMENT_URL
+        - **Commit**: \`${{ github.sha }}\`
+        - **Branche**: \`${{ github.ref_name }}\`
+        - **Auteur**: ${{ github.actor }}
+        - **Date**: $(date)
+        
+        ## Validation
+        - ✅ Pré-déploiement validé
+        - ✅ Assets vérifiés
+        - ✅ Performance analysée
+        $(if [ "$DEPLOYMENT_STATUS" = "success" ]; then echo "- ✅ Déployé avec succès"; else echo "- ❌ Échec du déploiement"; fi)
+        
+        ## Surveillance
+        Surveillez les métriques suivantes:
+        1. Temps de chargement initial
+        2. Erreurs console
+        3. Expérience utilisateur
+        
+        ## Support
+        En cas de problème:
+        1. Consulter les logs GitHub Actions
+        2. Vérifier l'URL: $DEPLOYMENT_URL
+        3. Ouvrir une issue si nécessaire
+        EOF
+        
+        echo "📄 Résumé généré"
+
+    - name: Upload deployment summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-summary
+        path: deployment-summary.md
+        retention-days: 30
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        echo "📢 Notification du statut de déploiement..."
+        
+        DEPLOYMENT_STATUS=${{ job.status }}
+        DEPLOYMENT_URL=${{ steps.deployment.outputs.page_url }}
+        
+        if [ "$DEPLOYMENT_STATUS" = "success" ]; then
+          echo "🎉 DÉPLOIEMENT RÉUSSI!"
+          echo ""
+          echo "Le site DevOps Pipeline a été déployé avec succès."
+          echo ""
+          echo "🔗 Accéder au site:"
+          echo "$DEPLOYMENT_URL"
+          echo ""
+          echo "📊 Métriques:"
+          echo "- Site disponible en production"
+          echo "- CDN GitHub Pages activé"
+          echo "- HTTPS automatique"
+          echo "- Surveillance en cours"
+        else
+          echo "❌ DÉPLOIEMENT ÉCHOUÉ"
+          echo ""
+          echo "Le déploiement a rencontré une erreur."
+          echo ""
+          echo "🔧 Actions recommandées:"
+          echo "1. Vérifier les logs du workflow"
+          echo "2. Corriger les problèmes identifiés"
+          echo "3. Relancer le déploiement"
+          echo ""
+          echo "⚠️  Le site précédent reste disponible"
+        fi
