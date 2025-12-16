@@ -113,13 +113,63 @@ jobs:
           echo "⚠️  ATTENTION: Taille totale > 100MB - GitHub Pages a des limites"
         fi
         
-        # Vérifier les liens externes
+        # Vérifier les liens externes - VERSION CORRIGÉE
         echo ""
         echo "🔗 Vérification des liens externes..."
-        if grep -r "http://" --include="*.html" --include="*.css" --include="*.js" "${{ env.SOURCE_DIR }}" 2>/dev/null | grep -v "http://localhost" | grep -v "http://127.0.0.1"; then
-          echo "⚠️  ATTENTION: Liens HTTP non sécurisés détectés"
+        
+        # Méthode plus précise qui ignore les data URIs et les attributs XML
+        HTTP_INSECURE_FOUND=false
+        FILES_CHECKED=0
+        
+        # Parcourir tous les fichiers HTML, CSS et JS
+        for file in $(find "${{ env.SOURCE_DIR }}" \( -name "*.html" -o -name "*.css" -o -name "*.js" \) -type f 2>/dev/null); do
+          FILES_CHECKED=$((FILES_CHECKED + 1))
+          
+          # Analyser chaque ligne du fichier
+          line_number=0
+          while IFS= read -r line; do
+            line_number=$((line_number + 1))
+            
+            # Chercher des URLs HTTP dans la ligne
+            # Pattern pour trouver http:// suivi de caractères non-espace
+            if echo "$line" | grep -q -E 'http://[^"'' <>]*'; then
+              
+              # Ignorer les cas spécifiques (faux positifs)
+              # 1. Data URIs (data:image/svg+xml,...)
+              # 2. Localhost
+              # 3. Attrbuts XML dans les SVGs
+              # 4. Commentaires
+              if echo "$line" | grep -q -E 'data:image/[^;]+;base64,' && \
+                 echo "$line" | grep -q 'xmlns="http://www.w3.org/2000/svg"'; then
+                # C'est un data URI avec SVG - ignorer
+                continue
+              elif echo "$line" | grep -q 'http://localhost' || \
+                   echo "$line" | grep -q 'http://127.0.0.1' || \
+                   echo "$line" | grep -q 'http://0.0.0.0'; then
+                # URLs locales - ignorer
+                continue
+              elif echo "$line" | grep -q -E '^\s*//' || \
+                   echo "$line" | grep -q -E '^\s*/\*' || \
+                   echo "$line" | grep -q -E '\*/$'; then
+                # Lignes de commentaires - ignorer
+                continue
+              else
+                # Vrai lien HTTP non sécurisé trouvé
+                echo "⚠️  Lien HTTP non sécurisé détecté:"
+                echo "   Fichier: $file (ligne $line_number)"
+                echo "   Contenu: ${line:0:80}..."
+                HTTP_INSECURE_FOUND=true
+              fi
+            fi
+          done < "$file"
+        done
+        
+        if [ "$HTTP_INSECURE_FOUND" = true ]; then
+          echo ""
+          echo "🔧 Recommandation:"
+          echo "   Remplacer les liens 'http://' par 'https://' pour une meilleure sécurité"
         else
-          echo "✅ Tous les liens externes utilisent HTTPS ou sont locaux"
+          echo "✅ Aucun lien HTTP non sécurisé détecté ($FILES_CHECKED fichiers analysés)"
         fi
         
         # Vérifier les erreurs 404 potentielles
