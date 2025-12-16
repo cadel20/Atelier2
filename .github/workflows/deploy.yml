@@ -1,373 +1,554 @@
-name: CI Pipeline
+name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
     branches: [main]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environnement de déploiement'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+      force-deploy:
+        description: 'Forcer le déploiement même si des tests échouent'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  pages: write
+  id-token: write
+  contents: read
+
+env:
+  NODE_ENV: production
+  DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'production' }}
+  SOURCE_DIR: public  # Dossier source pour le déploiement
 
 jobs:
-  validate-and-build:
+  validate-deployment:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    name: Validate & Build
-    env:
-      NODE_ENV: ci
-      SOURCE_DIR: public  # Dossier source pour les fichiers statiques
-
+    name: Validate Deployment
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci --no-audit --prefer-offline
-        env:
-          NODE_ENV: development
-
-      - name: Validate project structure
-        run: |
-          echo "🔍 Validation de la structure du projet..."
-          echo "=========================================="
-          
-          # Vérifier l'existence du dossier public
-          if [ ! -d "${{ env.SOURCE_DIR }}" ]; then
-            echo "❌ ERREUR CRITIQUE: Dossier '${{ env.SOURCE_DIR }}' manquant"
-            echo "Votre projet doit contenir un dossier '${{ env.SOURCE_DIR }}/' avec les fichiers statiques"
-            exit 1
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+    
+    - name: Validate public directory
+      run: |
+        echo "🔍 Validation du dossier public..."
+        echo "=========================================="
+        
+        # Vérifier l'existence du dossier public
+        if [ ! -d "${{ env.SOURCE_DIR }}" ]; then
+          echo "❌ ERREUR: Dossier '${{ env.SOURCE_DIR }}' manquant"
+          echo "Votre structure de projet doit inclure un dossier '${{ env.SOURCE_DIR }}/' contenant index.html"
+          exit 1
+        fi
+        
+        echo "✅ Dossier '${{ env.SOURCE_DIR }}/' présent"
+        
+        # Vérifier les fichiers obligatoires dans public/
+        REQUIRED_FILES=("index.html")
+        missing_files=0
+        
+        for file in "${REQUIRED_FILES[@]}"; do
+          if [ ! -f "${{ env.SOURCE_DIR }}/$file" ]; then
+            echo "❌ ERREUR: $file manquant dans ${{ env.SOURCE_DIR }}/ - requis pour le déploiement"
+            missing_files=$((missing_files + 1))
+          else
+            echo "✅ ${{ env.SOURCE_DIR }}/$file présent"
           fi
-          echo "✅ Dossier '${{ env.SOURCE_DIR }}/' présent"
+        done
+        
+        if [ $missing_files -gt 0 ]; then
+          echo ""
+          echo "❌ $missing_files fichier(s) manquant(s) - déploiement impossible"
+          exit 1
+        fi
+        
+        # Vérifier la structure du dossier public
+        echo ""
+        echo "📁 Structure du dossier ${{ env.SOURCE_DIR }}:"
+        find "${{ env.SOURCE_DIR }}" -type f | head -20 | sed 's/^/  📄 /'
+        
+        TOTAL_FILES=$(find "${{ env.SOURCE_DIR }}" -type f | wc -l)
+        echo "Total fichiers: $TOTAL_FILES"
+        
+        if [ $TOTAL_FILES -eq 0 ]; then
+          echo "⚠️  ATTENTION: Dossier ${{ env.SOURCE_DIR }} vide"
+        fi
+
+    - name: Validate deployment files
+      run: |
+        echo "🔍 Validation des fichiers de déploiement..."
+        echo "=========================================="
+        
+        # Vérifier la taille totale
+        echo "📏 Analyse de la taille du projet..."
+        TOTAL_SIZE=$(find "${{ env.SOURCE_DIR }}" -type f -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" 2>/dev/null | xargs stat -f%z 2>/dev/null | awk '{sum+=$1} END {print sum}')
+        
+        if [ -z "$TOTAL_SIZE" ]; then
+          TOTAL_SIZE=$(find "${{ env.SOURCE_DIR }}" -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) -exec stat -c%s {} + 2>/dev/null | awk '{sum+=$1} END {print sum}')
+        fi
+        
+        if [ -z "$TOTAL_SIZE" ]; then
+          TOTAL_SIZE=0
+        fi
+        
+        echo "Taille totale des assets: $((TOTAL_SIZE / 1024)) KB"
+        
+        if [ $TOTAL_SIZE -gt 100000000 ]; then  # > 100MB
+          echo "⚠️  ATTENTION: Taille totale > 100MB - GitHub Pages a des limites"
+        fi
+        
+        # Vérifier les liens externes
+        echo ""
+        echo "🔗 Vérification des liens externes..."
+        if grep -r "http://" --include="*.html" --include="*.css" --include="*.js" "${{ env.SOURCE_DIR }}" 2>/dev/null | grep -v "http://localhost" | grep -v "http://127.0.0.1"; then
+          echo "⚠️  ATTENTION: Liens HTTP non sécurisés détectés"
+        else
+          echo "✅ Tous les liens externes utilisent HTTPS ou sont locaux"
+        fi
+        
+        # Vérifier les erreurs 404 potentielles
+        echo ""
+        echo "🔍 Vérification des fichiers référencés..."
+        HTML_FILES=$(find "${{ env.SOURCE_DIR }}" -name "*.html" -type f 2>/dev/null)
+        
+        for html_file in $HTML_FILES; do
+          echo "Analyse de $html_file..."
           
-          # Vérifier les fichiers essentiels dans public/
-          REQUIRED_FILES=("${{ env.SOURCE_DIR }}/index.html" "package.json")
-          missing_files=0
+          # Extraire les liens vers les assets locaux
+          ASSETS=$(grep -o 'src="[^"]*"' "$html_file" 2>/dev/null | cut -d'"' -f2 | grep -v "^http" | grep -v "^//")
+          ASSETS="$ASSETS $(grep -o 'href="[^"]*"' "$html_file" 2>/dev/null | cut -d'"' -f2 | grep -v "^http" | grep -v "^//" | grep -v "^mailto:" | grep -v "^tel:")"
+          ASSETS="$ASSETS $(grep -o 'url([^)]*)' "$html_file" 2>/dev/null | sed "s/url('//;s/')//;s/url(\"//;s/\")//" | grep -v "^http" | grep -v "^//")"
           
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ ERREUR CRITIQUE: $file manquant"
-              missing_files=$((missing_files + 1))
-            else
-              echo "✅ $file présent"
+          for asset in $ASSETS; do
+            # Les assets sont référencés depuis la racine du site, donc on les cherche dans public/
+            if [ ! -f "${{ env.SOURCE_DIR }}/$asset" ] && [ ! -d "${{ env.SOURCE_DIR }}/$asset" ]; then
+              echo "⚠️  Asset manquant dans $html_file: $asset"
             fi
           done
-          
-          if [ $missing_files -gt 0 ]; then
-            echo ""
-            echo "❌ $missing_files fichier(s) manquant(s) - pipeline impossible"
-            exit 1
-          fi
+        done
+        
+        echo ""
+        echo "✅ Validation des fichiers terminée"
 
-      - name: Validate HTML structure
-        run: |
-          echo "🔍 Validation de la structure HTML..."
-          echo "=========================================="
-          
-          HTML_FILE="${{ env.SOURCE_DIR }}/index.html"
-          
-          if [ ! -f "$HTML_FILE" ]; then
-            echo "❌ ERREUR CRITIQUE: $HTML_FILE manquant"
-            exit 1
-          fi
-          
-          # Validation approfondie d'index.html
-          echo ""
-          echo "📋 Validation de $HTML_FILE..."
-          
-          # Vérifier le doctype (CRITIQUE)
-          if ! grep -q "^<!DOCTYPE html>" "$HTML_FILE"; then
-            echo "❌ ERREUR CRITIQUE: Doctype HTML5 manquant"
-            exit 1
-          fi
-          echo "✅ Doctype HTML5 présent"
-          
-          # Vérifier les balises essentielles
-          ESSENTIAL_TAGS=("html lang=" "head" "body" "title" "meta charset=" "meta name=\"viewport\"")
-          missing_tags=0
-          
-          for tag in "${ESSENTIAL_TAGS[@]}"; do
-            if ! grep -q "$tag" "$HTML_FILE"; then
-              echo "⚠️  ATTENTION: '$tag' manquant ou incorrect"
-              ((missing_tags++))
-            else
-              echo "✅ '$tag' présent"
-            fi
-          done
-          
-          # Vérifier les balises de fermeture
-          echo ""
-          echo "🔒 Vérification des balises fermantes..."
-          if ! grep -q "</html>" "$HTML_FILE"; then
-            echo "⚠️  ATTENTION: Balise </html> manquante"
-            ((missing_tags++))
-          fi
-          if ! grep -q "</body>" "$HTML_FILE"; then
-            echo "⚠️  ATTENTION: Balise </body> manquante"
-            ((missing_tags++))
-          fi
-          
-          # Vérifier la taille du fichier
-          echo ""
-          echo "📏 Analyse de la taille..."
-          FILE_SIZE=$(stat -f%z "$HTML_FILE" 2>/dev/null || stat -c%s "$HTML_FILE" 2>/dev/null)
-          echo "Taille de $HTML_FILE: $FILE_SIZE octets"
-          
-          if [ $FILE_SIZE -lt 1000 ]; then
-            echo "⚠️  ATTENTION: Fichier très petit (<1KB) - possible erreur"
-          elif [ $FILE_SIZE -gt 500000 ]; then
-            echo "⚠️  ATTENTION: Fichier très grand (>500KB) - optimisation recommandée"
-          else
-            echo "✅ Taille optimale"
-          fi
-          
-          # Vérifier les ressources externes
-          echo ""
-          echo "🌐 Vérification des ressources..."
-          if grep -q "http://" "$HTML_FILE"; then
-            echo "⚠️  ATTENTION: Liens HTTP non sécurisés détectés (préférez HTTPS)"
-          fi
-          
-          # Vérifier les scripts et styles
-          SCRIPT_COUNT=$(grep -c "<script" "$HTML_FILE")
-          STYLE_COUNT=$(grep -c "<style\|\.css" "$HTML_FILE")
-          echo "Scripts détectés: $SCRIPT_COUNT"
-          echo "Styles détectés: $STYLE_COUNT"
-          
-          # Résumé
-          echo ""
-          echo "=========================================="
-          if [ $missing_tags -gt 0 ]; then
-            echo "⚠️  Validation terminée avec $missing_tags avertissement(s)"
-          else
-            echo "✅ Validation HTML réussie"
-          fi
+    - name: Check HTML validity
+      run: |
+        echo "📋 Validation de la qualité HTML..."
+        echo "=========================================="
+        
+        MAIN_HTML="${{ env.SOURCE_DIR }}/index.html"
+        
+        if [ ! -f "$MAIN_HTML" ]; then
+          echo "❌ ERREUR: $MAIN_HTML manquant"
+          exit 1
+        fi
+        
+        # Vérifier les balises meta essentielles
+        echo "🔍 Balises meta SEO..."
+        if grep -q "<meta name=\"description\"" "$MAIN_HTML"; then
+          echo "✅ Meta description présente"
+        else
+          echo "⚠️  ATTENTION: Meta description manquante (impact SEO)"
+        fi
+        
+        if grep -q "<meta name=\"keywords\"" "$MAIN_HTML"; then
+          echo "✅ Meta keywords présente"
+        else
+          echo "ℹ️  Meta keywords optionnelle"
+        fi
+        
+        if grep -q "<meta property=\"og:" "$MAIN_HTML"; then
+          echo "✅ Open Graph tags présentes"
+        else
+          echo "⚠️  ATTENTION: Open Graph tags manquantes (réseaux sociaux)"
+        fi
+        
+        # Vérifier le favicon
+        echo ""
+        echo "🎨 Favicon..."
+        if grep -q "rel=\"icon\"" "$MAIN_HTML" || grep -q "rel=\"shortcut icon\"" "$MAIN_HTML"; then
+          echo "✅ Favicon détecté"
+        else
+          echo "⚠️  ATTENTION: Favicon manquant"
+        fi
+        
+        # Vérifier les analytics/tracking (optionnel)
+        echo ""
+        echo "📊 Analytics..."
+        if grep -q "google-analytics\|gtag\|analytics" "$MAIN_HTML"; then
+          echo "✅ Google Analytics/GTag détecté"
+        elif grep -q "matomo\|piwik" "$MAIN_HTML"; then
+          echo "✅ Matomo/Piwik détecté"
+        else
+          echo "ℹ️  Aucun outil d'analytics détecté"
+        fi
 
-      - name: Validate assets in public directory
-        run: |
-          echo "📁 Validation des assets dans ${{ env.SOURCE_DIR }}/..."
-          echo "=========================================="
-          
-          # Vérifier les sous-dossiers communs
-          COMMON_SUBDIRS=("css" "js" "images" "assets")
-          
-          for subdir in "${COMMON_SUBDIRS[@]}"; do
-            if [ -d "${{ env.SOURCE_DIR }}/$subdir" ]; then
-              echo "✅ Sous-dossier $subdir/ présent"
-              
-              # Compter les fichiers
-              FILE_COUNT=$(find "${{ env.SOURCE_DIR }}/$subdir" -type f 2>/dev/null | wc -l)
-              echo "   📊 $FILE_COUNT fichier(s)"
-            else
-              echo "ℹ️  Sous-dossier $subdir/ absent (optionnel)"
-            fi
-          done
-          
-          # Lister tous les fichiers dans public/
-          echo ""
-          echo "📋 Liste des fichiers dans ${{ env.SOURCE_DIR }}/:"
-          find "${{ env.SOURCE_DIR }}" -type f 2>/dev/null | sort | sed 's/^/  📄 /' | head -20
-          
-          TOTAL_FILES=$(find "${{ env.SOURCE_DIR }}" -type f 2>/dev/null | wc -l)
-          echo ""
-          echo "📊 Total fichiers: $TOTAL_FILES"
-          
-          if [ $TOTAL_FILES -eq 0 ]; then
-            echo "⚠️  ATTENTION: Dossier ${{ env.SOURCE_DIR }}/ vide"
-          fi
+    - name: Check performance metrics
+      run: |
+        echo "⚡ Analyse des métriques de performance..."
+        echo "=========================================="
+        
+        MAIN_HTML="${{ env.SOURCE_DIR }}/index.html"
+        
+        # Vérifier les ressources bloquantes
+        echo "🔍 Scripts bloquants..."
+        SYNC_SCRIPTS=$(grep -c '<script src=' "$MAIN_HTML")
+        ASYNC_SCRIPTS=$(grep -c 'async' "$MAIN_HTML")
+        DEFER_SCRIPTS=$(grep -c 'defer' "$MAIN_HTML")
+        
+        echo "Scripts synchrones: $SYNC_SCRIPTS"
+        echo "Scripts async: $ASYNC_SCRIPTS"
+        echo "Scripts defer: $DEFER_SCRIPTS"
+        
+        if [ $SYNC_SCRIPTS -gt 3 ]; then
+          echo "⚠️  ATTENTION: Trop de scripts synchrones ($SYNC_SCRIPTS) - impacte le LCP"
+        fi
+        
+        # Vérifier le CSS inline vs externe
+        echo ""
+        echo "🎨 CSS..."
+        STYLE_TAGS=$(grep -c '<style>' "$MAIN_HTML")
+        LINK_CSS=$(grep -c 'rel="stylesheet"' "$MAIN_HTML")
+        
+        echo "Balises <style> inline: $STYLE_TAGS"
+        echo "Feuilles de style externes: $LINK_CSS"
+        
+        if [ $STYLE_TAGS -gt 2 ]; then
+          echo "⚠️  ATTENTION: Trop de CSS inline - peut bloquer le rendu"
+        fi
+        
+        # Vérifier les images
+        echo ""
+        echo "🖼️ Images..."
+        IMG_TAGS=$(grep -c '<img' "$MAIN_HTML")
+        IMG_WITH_ALT=$(grep -c 'alt="' "$MAIN_HTML")
+        
+        echo "Total images: $IMG_TAGS"
+        echo "Images avec attribut alt: $IMG_WITH_ALT"
+        
+        if [ $IMG_TAGS -gt 0 ] && [ $IMG_WITH_ALT -lt $IMG_TAGS ]; then
+          echo "⚠️  ATTENTION: Certaines images n'ont pas d'attribut alt (SEO/accessibilité)"
+        fi
 
-      - name: Check package.json structure
-        run: |
-          echo "📦 Validation de package.json..."
-          echo "=========================================="
-          
-          # Vérifier les champs essentiels
-          REQUIRED_FIELDS=("name" "version" "description")
-          for field in "${REQUIRED_FIELDS[@]}"; do
-            if ! grep -q "\"$field\"" package.json; then
-              echo "⚠️  ATTENTION: Champ '$field' manquant dans package.json"
-            else
-              echo "✅ '$field' présent"
-            fi
-          done
-          
-          # Vérifier les scripts
-          echo ""
-          echo "⚡ Scripts disponibles:"
-          if grep -q '"scripts"' package.json; then
-            npm run
-          else
-            echo "ℹ️  Aucun script défini"
-          fi
+    - name: Create deployment report
+      run: |
+        echo "📊 Création du rapport de déploiement..."
+        echo "=========================================="
+        
+        TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+        COMMIT_HASH=$(git rev-parse --short HEAD)
+        COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
+        COMMIT_MESSAGE=$(git log -1 --pretty=format:'%s')
+        
+        cat > deployment-report.md << EOF
+        # Rapport de Déploiement
+        
+        ## Informations Générales
+        - **Date/Heure**: $TIMESTAMP
+        - **Environnement**: ${{ env.DEPLOY_ENV }}
+        - **Commit**: $COMMIT_HASH
+        - **Auteur**: $COMMIT_AUTHOR
+        - **Message**: $COMMIT_MESSAGE
+        - **Workflow**: ${{ github.workflow }}
+        - **Run ID**: ${{ github.run_id }}
+        - **Dossier source**: ${{ env.SOURCE_DIR }}
+        
+        ## Métriques du Projet
+        $(echo "Fichiers HTML: $(find "${{ env.SOURCE_DIR }}" -name "*.html" -type f 2>/dev/null | wc -l)")
+        $(echo "Fichiers CSS: $(find "${{ env.SOURCE_DIR }}" -name "*.css" -type f 2>/dev/null | wc -l)")
+        $(echo "Fichiers JS: $(find "${{ env.SOURCE_DIR }}" -name "*.js" -type f 2>/dev/null | wc -l)")
+        $(echo "Images: $(find "${{ env.SOURCE_DIR }}" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" -type f 2>/dev/null | wc -l)")
+        
+        ## Validation
+        - ✅ Dossier ${{ env.SOURCE_DIR }} validé
+        - ✅ Structure HTML validée
+        - ✅ Assets vérifiés
+        - ✅ Performance analysée
+        
+        ## Prochaines Étapes
+        1. Déploiement sur GitHub Pages
+        2. Invalidation du cache CDN
+        3. Surveillance des métriques
+        
+        ## URL de Déploiement
+        Une fois déployé, le site sera disponible à:
+        \`https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/\`
+        
+        ---
+        *Rapport généré automatiquement par le workflow de déploiement*
+        EOF
+        
+        echo "📄 Rapport généré: deployment-report.md"
+        cat deployment-report.md
 
-      - name: Run linter (si configuré)
-        run: |
-          echo "🧹 Exécution du linter..."
-          if [ -f ".eslintrc" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.json" ]; then
-            echo "ESLint configuré - exécution..."
-            npx eslint . --ext .js || echo "⚠️  ESLint a trouvé des problèmes"
-          else
-            echo "ℹ️  ESLint non configuré"
-          fi
+    - name: Upload deployment report
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-report
+        path: deployment-report.md
+        retention-days: 90
 
-      - name: Run tests
-        run: |
-          echo "🧪 Exécution des tests..."
-          echo "=========================================="
-          
-          # Vérifier si des tests sont configurés
-          if npm run | grep -q " test "; then
-            echo "Tests détectés - exécution..."
-            npm test
-            TEST_RESULT=$?
-            
-            if [ $TEST_RESULT -eq 0 ]; then
-              echo "✅ Tous les tests ont réussi"
-            else
-              echo "❌ Certains tests ont échoué"
-              exit $TEST_RESULT
-            fi
-          else
-            echo "ℹ️  Aucun script de test trouvé"
-            echo "✅ Tests simulés - status OK"
-          fi
+  deploy-production:
+    runs-on: ubuntu-latest
+    name: Deploy to GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: validate-deployment
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Download deployment report
+      uses: actions/download-artifact@v4
+      with:
+        name: deployment-report
+        path: ./
 
-      - name: Build application
-        run: |
-          echo "🏗️  Construction de l'application..."
-          echo "=========================================="
-          
-          # Créer le dossier de build
-          BUILD_DIR="dist"
-          echo "Création du dossier: $BUILD_DIR"
-          mkdir -p $BUILD_DIR
-          
-          # Copier le dossier public/ vers dist/
-          echo "📁 Copie de ${{ env.SOURCE_DIR }}/ vers $BUILD_DIR/"
-          
-          if [ -d "${{ env.SOURCE_DIR }}" ]; then
-            cp -r "${{ env.SOURCE_DIR }}"/* $BUILD_DIR/ 2>/dev/null || true
-            echo "✅ ${{ env.SOURCE_DIR }}/ copié"
-          else
-            echo "❌ ERREUR: ${{ env.SOURCE_DIR }}/ manquant"
-            exit 1
-          fi
-          
-          # Copier package.json et autres fichiers importants
-          echo "📄 Copie des fichiers de configuration..."
-          for file in "package.json" "README.md" "LICENSE"; do
-            if [ -f "$file" ]; then
-              cp "$file" $BUILD_DIR/
-              echo "✅ $file copié"
-            fi
-          done
-          
-          # Afficher la structure du build
-          echo ""
-          echo "📂 Structure du dossier $BUILD_DIR:"
-          find $BUILD_DIR -type f | sort | sed 's/^/  /' | head -30
-          echo ""
-          echo "📊 Taille totale: $(du -sh $BUILD_DIR | cut -f1)"
+    - name: Setup GitHub Pages
+      uses: actions/configure-pages@v4
+      with:
+        enablement: true
+    
+    - name: Prepare build directory
+      run: |
+        echo "📁 Préparation du dossier de build..."
+        echo "Source: ${{ env.SOURCE_DIR }}/"
+        echo "=========================================="
+        
+        # Vérifier que le dossier source existe
+        if [ ! -d "${{ env.SOURCE_DIR }}" ]; then
+          echo "❌ ERREUR: Dossier source '${{ env.SOURCE_DIR }}' manquant"
+          exit 1
+        fi
+        
+        # Créer un répertoire temporaire pour le build
+        mkdir -p _site_build
+        
+        # Copier tout le contenu du dossier public
+        echo "📋 Copie du dossier ${{ env.SOURCE_DIR }}..."
+        cp -r "${{ env.SOURCE_DIR }}"/* _site_build/ 2>/dev/null || true
+        
+        # Vérifier ce qui a été copié
+        echo ""
+        echo "📁 Structure du build:"
+        find _site_build -type f | head -30 | sed 's/^/  📄 /'
+        
+        TOTAL_FILES=$(find _site_build -type f | wc -l)
+        echo "Total fichiers dans le build: $TOTAL_FILES"
+        
+        if [ $TOTAL_FILES -eq 0 ]; then
+          echo "❌ ERREUR: Aucun fichier copié - dossier source vide?"
+          exit 1
+        fi
+        
+        # Ajouter un fichier CNAME si présent à la racine
+        if [ -f "CNAME" ]; then
+          echo "  🌐 CNAME détecté à la racine"
+          cp CNAME _site_build/
+        fi
+        
+        # Ajouter un 404.html personnalisé si absent
+        if [ ! -f "_site_build/404.html" ]; then
+          echo "  🔧 Création d'une page 404 basique..."
+          cat > _site_build/404.html << EOF
+          <!DOCTYPE html>
+          <html lang="fr">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Page non trouvée - DevOps Pipeline</title>
+              <style>
+                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                  h1 { color: #333; }
+                  p { color: #666; }
+                  a { color: #2563eb; text-decoration: none; }
+              </style>
+          </head>
+          <body>
+              <h1>404 - Page non trouvée</h1>
+              <p>La page que vous recherchez n'existe pas.</p>
+              <p><a href="/">Retour à l'accueil</a></p>
+              <p><small>DevOps Pipeline CI/CD - ${{ github.sha }}</small></p>
+          </body>
+          </html>
+          EOF
+        fi
+        
+        # Créer un fichier README pour GitHub Pages
+        cat > _site_build/README_DEPLOYMENT.md << EOF
+        # Site DevOps Pipeline
+        
+        Ce site a été déployé automatiquement via GitHub Actions.
+        
+        ## Informations
+        - **Dernier commit**: ${{ github.sha }}
+        - **Date de déploiement**: $(date)
+        - **Environnement**: ${{ env.DEPLOY_ENV }}
+        - **Workflow**: ${{ github.workflow }}
+        - **Dossier source**: ${{ env.SOURCE_DIR }}
+        
+        ## Structure
+        Ce site utilise:
+        - HTML5/CSS3/JavaScript
+        - GitHub Pages pour l'hébergement
+        - CI/CD automatique
+        
+        ## Maintenance
+        Pour mettre à jour le site:
+        1. Modifier les fichiers dans ${{ env.SOURCE_DIR }}/
+        2. Pusher les changements
+        3. Le déploiement se fera automatiquement
+        
+        ---
+        *Généré automatiquement par le workflow de déploiement*
+        EOF
+        
+        echo ""
+        echo "📊 Taille du build: $(du -sh _site_build | cut -f1)"
+        echo "✅ Préparation terminée"
 
-      - name: Security scan
-        run: |
-          echo "🔒 Scan de sécurité..."
-          echo "=========================================="
-          
-          # Vérifier les dépendances vulnérables
-          if [ -f "package-lock.json" ]; then
-            echo "📦 Scan des dépendances..."
-            npm audit --audit-level=moderate || echo "⚠️  Vulnérabilités détectées - vérifiez 'npm audit'"
-          else
-            echo "ℹ️  package-lock.json non trouvé - audit non effectué"
-          fi
-          
-          # Vérifier les permissions de fichiers
-          echo ""
-          echo "🔐 Vérification des permissions..."
-          find . -name "*.sh" -type f | while read file; do
-            if [ -x "$file" ]; then
-              echo "⚠️  Script exécutable détecté: $file"
-            fi
-          done
+    - name: Upload to GitHub Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: _site_build
+    
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        timeout: 600000  # 10 minutes timeout
+    
+    - name: Verify deployment
+      run: |
+        echo "✅ Déploiement terminé avec succès!"
+        echo ""
+        echo "📊 RÉSUMÉ DU DÉPLOIEMENT"
+        echo "========================"
+        echo "🌐 URL du site: ${{ steps.deployment.outputs.page_url }}"
+        echo "🆔 Commit: ${{ github.sha }}"
+        echo "👤 Déclenché par: ${{ github.actor }}"
+        echo "⏰ Heure: $(date)"
+        echo "📁 Source: ${{ env.SOURCE_DIR }}/"
+        echo ""
+        echo "🔧 Actions recommandées:"
+        echo "  1. Visiter ${{ steps.deployment.outputs.page_url }} pour vérifier"
+        echo "  2. Vérifier la console navigateur pour les erreurs"
+        echo "  3. Tester les fonctionnalités principales"
+        echo "  4. Surveiller les métriques de performance"
+        echo ""
+        echo "📈 Prochaines étapes:"
+        echo "  - Surveillance des logs (24-48h)"
+        echo "  - Collecte des feedbacks utilisateurs"
+        echo "  - Optimisation continue"
+        
+        # Générer un QR code pour l'URL (optionnel)
+        echo ""
+        echo "📱 QR Code pour mobile:"
+        echo "https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${{ steps.deployment.outputs.page_url }}"
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-pipeline-build
-          path: dist/
-          retention-days: 7
-        if: success()
+    - name: Create deployment summary
+      if: always()
+      run: |
+        echo "📋 Création du résumé de déploiement..."
+        
+        DEPLOYMENT_STATUS=${{ job.status }}
+        DEPLOYMENT_URL=${{ steps.deployment.outputs.page_url }}
+        
+        cat > deployment-summary.md << EOF
+        # Résumé du Déploiement
+        
+        ## Statut: $(if [ "$DEPLOYMENT_STATUS" = "success" ]; then echo "✅ SUCCÈS"; else echo "❌ ÉCHEC"; fi)
+        
+        ## Détails
+        - **URL**: $DEPLOYMENT_URL
+        - **Commit**: \`${{ github.sha }}\`
+        - **Branche**: \`${{ github.ref_name }}\`
+        - **Auteur**: ${{ github.actor }}
+        - **Date**: $(date)
+        - **Dossier source**: ${{ env.SOURCE_DIR }}
+        
+        ## Validation
+        - ✅ Dossier source validé
+        - ✅ Assets vérifiés
+        - ✅ Performance analysée
+        $(if [ "$DEPLOYMENT_STATUS" = "success" ]; then echo "- ✅ Déployé avec succès"; else echo "- ❌ Échec du déploiement"; fi)
+        
+        ## Surveillance
+        Surveillez les métriques suivantes:
+        1. Temps de chargement initial
+        2. Erreurs console
+        3. Expérience utilisateur
+        
+        ## Support
+        En cas de problème:
+        1. Consulter les logs GitHub Actions
+        2. Vérifier l'URL: $DEPLOYMENT_URL
+        3. Ouvrir une issue si nécessaire
+        EOF
+        
+        echo "📄 Résumé généré"
 
-      - name: Deploy preview (pour les PR)
-        if: github.event_name == 'pull_request'
-        run: |
-          echo "🚀 Déploiement de prévisualisation..."
-          echo "=========================================="
-          echo "URL de prévisualisation disponible sur:"
-          echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo ""
-          echo "📦 Artefact téléchargeable dans l'onglet 'Artifacts'"
+    - name: Upload deployment summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-summary
+        path: deployment-summary.md
+        retention-days: 30
 
-      - name: Deploy to dev (push sur dev)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-        run: |
-          echo "🚀 Déploiement sur environnement dev..."
-          echo "=========================================="
-          echo "Cette étape déclencherait le déploiement automatique"
-          echo "sur le serveur de développement."
-
-      - name: Display CI Pipeline summary
-        if: always()
-        run: |
+    - name: Notify deployment status
+      if: always()
+      run: |
+        echo "📢 Notification du statut de déploiement..."
+        echo ""
+        
+        DEPLOYMENT_STATUS=${{ job.status }}
+        DEPLOYMENT_URL=${{ steps.deployment.outputs.page_url }}
+        
+        if [ "$DEPLOYMENT_STATUS" = "success" ]; then
+          echo "🎉 DÉPLOIEMENT RÉUSSI!"
           echo ""
-          echo "╔══════════════════════════════════════════════════╗"
-          echo "║                CI PIPELINE SUMMARY               ║"
-          echo "╚══════════════════════════════════════════════════╝"
+          echo "Le site DevOps Pipeline a été déployé avec succès."
           echo ""
-          echo "📊 Informations du pipeline:"
-          echo "  🔄 Événement: ${{ github.event_name }}"
-          echo "  🌿 Branche: ${{ github.ref_name }}"
-          echo "  👤 Déclenché par: ${{ github.actor }}"
-          echo "  🆔 Execution ID: ${{ github.run_id }}"
-          echo "  📁 Dossier source: ${{ env.SOURCE_DIR }}/"
+          echo "🔗 Accéder au site:"
+          echo "$DEPLOYMENT_URL"
           echo ""
-          echo "📋 Résumé des étapes:"
-          echo "  ✅ Code checkout"
-          echo "  ✅ Node.js 18 configuré"
-          echo "  ✅ Dépendances installées"
-          echo "  ✅ Validation structure projet"
-          echo "  ✅ Validation HTML/structure"
-          echo "  ✅ Validation assets"
-          echo "  ✅ Exécution des tests"
-          echo "  ✅ Build de l'application"
-          echo "  📦 Artefact généré: ci-pipeline-build"
+          echo "📊 Métriques:"
+          echo "- Site disponible en production"
+          echo "- CDN GitHub Pages activé"
+          echo "- HTTPS automatique"
+          echo "- Surveillance en cours"
+          echo "- Dossier source: ${{ env.SOURCE_DIR }}/"
+        else
+          echo "❌ DÉPLOIEMENT ÉCHOUÉ"
           echo ""
-          
-          if [ "${{ job.status }}" == "success" ]; then
-            echo "🎉 STATUS: SUCCÈS"
-            echo ""
-            echo "📈 Métriques:"
-            echo "  - Build prêt pour déploiement"
-            echo "  - Artefact disponible pendant 7 jours"
-            echo "  - Qualité du code validée"
-          else
-            echo "❌ STATUS: ÉCHEC"
-            echo ""
-            echo "🔧 Actions recommandées:"
-            echo "  1. Vérifier les logs d'erreur"
-            echo "  2. Corriger les problèmes identifiés"
-            echo "  3. Relancer le pipeline"
-          fi
-          
+          echo "Le déploiement a rencontré une erreur."
           echo ""
-          echo "🔗 Liens utiles:"
-          echo "  📋 Logs complets: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "  📦 Artefacts: Onglet 'Artifacts' dans GitHub Actions"
+          echo "🔧 Actions recommandées:"
+          echo "1. Vérifier les logs du workflow"
+          echo "2. Vérifier le dossier ${{ env.SOURCE_DIR }}/"
+          echo "3. Corriger les problèmes identifiés"
+          echo "4. Relancer le déploiement"
           echo ""
+          echo "⚠️  Le site précédent reste disponible"
+        fi

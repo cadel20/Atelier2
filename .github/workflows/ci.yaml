@@ -13,6 +13,7 @@ jobs:
     name: Validate & Build
     env:
       NODE_ENV: ci
+      SOURCE_DIR: public  # Dossier source pour les fichiers statiques
 
     steps:
       - name: Checkout code
@@ -32,27 +33,56 @@ jobs:
         env:
           NODE_ENV: development
 
+      - name: Validate project structure
+        run: |
+          echo "🔍 Validation de la structure du projet..."
+          echo "=========================================="
+          
+          # Vérifier l'existence du dossier public
+          if [ ! -d "${{ env.SOURCE_DIR }}" ]; then
+            echo "❌ ERREUR CRITIQUE: Dossier '${{ env.SOURCE_DIR }}' manquant"
+            echo "Votre projet doit contenir un dossier '${{ env.SOURCE_DIR }}/' avec les fichiers statiques"
+            exit 1
+          fi
+          echo "✅ Dossier '${{ env.SOURCE_DIR }}/' présent"
+          
+          # Vérifier les fichiers essentiels dans public/
+          REQUIRED_FILES=("${{ env.SOURCE_DIR }}/index.html" "package.json")
+          missing_files=0
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ ERREUR CRITIQUE: $file manquant"
+              missing_files=$((missing_files + 1))
+            else
+              echo "✅ $file présent"
+            fi
+          done
+          
+          if [ $missing_files -gt 0 ]; then
+            echo ""
+            echo "❌ $missing_files fichier(s) manquant(s) - pipeline impossible"
+            exit 1
+          fi
+
       - name: Validate HTML structure
         run: |
           echo "🔍 Validation de la structure HTML..."
           echo "=========================================="
           
-          # Vérifier l'existence des fichiers essentiels
-          REQUIRED_FILES=("index.html" "package.json")
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ ERREUR CRITIQUE: $file manquant"
-              exit 1
-            fi
-            echo "✅ $file présent"
-          done
+          HTML_FILE="${{ env.SOURCE_DIR }}/index.html"
+          
+          if [ ! -f "$HTML_FILE" ]; then
+            echo "❌ ERREUR CRITIQUE: $HTML_FILE manquant"
+            exit 1
+          fi
           
           # Validation approfondie d'index.html
           echo ""
-          echo "📋 Validation d'index.html..."
+          echo "📋 Validation de $HTML_FILE..."
           
           # Vérifier le doctype (CRITIQUE)
-          if ! grep -q "^<!DOCTYPE html>" index.html; then
+          if ! grep -q "^<!DOCTYPE html>" "$HTML_FILE"; then
             echo "❌ ERREUR CRITIQUE: Doctype HTML5 manquant"
             exit 1
           fi
@@ -63,7 +93,7 @@ jobs:
           missing_tags=0
           
           for tag in "${ESSENTIAL_TAGS[@]}"; do
-            if ! grep -q "$tag" index.html; then
+            if ! grep -q "$tag" "$HTML_FILE"; then
               echo "⚠️  ATTENTION: '$tag' manquant ou incorrect"
               ((missing_tags++))
             else
@@ -74,11 +104,11 @@ jobs:
           # Vérifier les balises de fermeture
           echo ""
           echo "🔒 Vérification des balises fermantes..."
-          if ! grep -q "</html>" index.html; then
+          if ! grep -q "</html>" "$HTML_FILE"; then
             echo "⚠️  ATTENTION: Balise </html> manquante"
             ((missing_tags++))
           fi
-          if ! grep -q "</body>" index.html; then
+          if ! grep -q "</body>" "$HTML_FILE"; then
             echo "⚠️  ATTENTION: Balise </body> manquante"
             ((missing_tags++))
           fi
@@ -86,8 +116,8 @@ jobs:
           # Vérifier la taille du fichier
           echo ""
           echo "📏 Analyse de la taille..."
-          FILE_SIZE=$(stat -f%z index.html 2>/dev/null || stat -c%s index.html 2>/dev/null)
-          echo "Taille d'index.html: $FILE_SIZE octets"
+          FILE_SIZE=$(stat -f%z "$HTML_FILE" 2>/dev/null || stat -c%s "$HTML_FILE" 2>/dev/null)
+          echo "Taille de $HTML_FILE: $FILE_SIZE octets"
           
           if [ $FILE_SIZE -lt 1000 ]; then
             echo "⚠️  ATTENTION: Fichier très petit (<1KB) - possible erreur"
@@ -100,13 +130,13 @@ jobs:
           # Vérifier les ressources externes
           echo ""
           echo "🌐 Vérification des ressources..."
-          if grep -q "http://" index.html; then
+          if grep -q "http://" "$HTML_FILE"; then
             echo "⚠️  ATTENTION: Liens HTTP non sécurisés détectés (préférez HTTPS)"
           fi
           
           # Vérifier les scripts et styles
-          SCRIPT_COUNT=$(grep -c "<script" index.html)
-          STYLE_COUNT=$(grep -c "<style\|\.css" index.html)
+          SCRIPT_COUNT=$(grep -c "<script" "$HTML_FILE")
+          STYLE_COUNT=$(grep -c "<style\|\.css" "$HTML_FILE")
           echo "Scripts détectés: $SCRIPT_COUNT"
           echo "Styles détectés: $STYLE_COUNT"
           
@@ -117,6 +147,39 @@ jobs:
             echo "⚠️  Validation terminée avec $missing_tags avertissement(s)"
           else
             echo "✅ Validation HTML réussie"
+          fi
+
+      - name: Validate assets in public directory
+        run: |
+          echo "📁 Validation des assets dans ${{ env.SOURCE_DIR }}/..."
+          echo "=========================================="
+          
+          # Vérifier les sous-dossiers communs
+          COMMON_SUBDIRS=("css" "js" "images" "assets")
+          
+          for subdir in "${COMMON_SUBDIRS[@]}"; do
+            if [ -d "${{ env.SOURCE_DIR }}/$subdir" ]; then
+              echo "✅ Sous-dossier $subdir/ présent"
+              
+              # Compter les fichiers
+              FILE_COUNT=$(find "${{ env.SOURCE_DIR }}/$subdir" -type f 2>/dev/null | wc -l)
+              echo "   📊 $FILE_COUNT fichier(s)"
+            else
+              echo "ℹ️  Sous-dossier $subdir/ absent (optionnel)"
+            fi
+          done
+          
+          # Lister tous les fichiers dans public/
+          echo ""
+          echo "📋 Liste des fichiers dans ${{ env.SOURCE_DIR }}/:"
+          find "${{ env.SOURCE_DIR }}" -type f 2>/dev/null | sort | sed 's/^/  📄 /' | head -20
+          
+          TOTAL_FILES=$(find "${{ env.SOURCE_DIR }}" -type f 2>/dev/null | wc -l)
+          echo ""
+          echo "📊 Total fichiers: $TOTAL_FILES"
+          
+          if [ $TOTAL_FILES -eq 0 ]; then
+            echo "⚠️  ATTENTION: Dossier ${{ env.SOURCE_DIR }}/ vide"
           fi
 
       - name: Check package.json structure
@@ -185,45 +248,30 @@ jobs:
           echo "Création du dossier: $BUILD_DIR"
           mkdir -p $BUILD_DIR
           
-          # Copier les fichiers essentiels
-          echo "📁 Copie des fichiers..."
+          # Copier le dossier public/ vers dist/
+          echo "📁 Copie de ${{ env.SOURCE_DIR }}/ vers $BUILD_DIR/"
           
-          # HTML
-          cp index.html $BUILD_DIR/
-          echo "✅ index.html copié"
-          
-          # CSS
-          if [ -d "css" ]; then
-            cp -r css $BUILD_DIR/
-            echo "✅ Dossier css copié"
+          if [ -d "${{ env.SOURCE_DIR }}" ]; then
+            cp -r "${{ env.SOURCE_DIR }}"/* $BUILD_DIR/ 2>/dev/null || true
+            echo "✅ ${{ env.SOURCE_DIR }}/ copié"
+          else
+            echo "❌ ERREUR: ${{ env.SOURCE_DIR }}/ manquant"
+            exit 1
           fi
           
-          # JS
-          if [ -d "js" ]; then
-            cp -r js $BUILD_DIR/
-            echo "✅ Dossier js copié"
-          fi
-          
-          # Images
-          if [ -d "images" ]; then
-            cp -r images $BUILD_DIR/
-            echo "✅ Dossier images copié"
-          fi
-          
-          # Autres fichiers statiques
-          for pattern in "*.css" "*.js" "*.png" "*.jpg" "*.jpeg" "*.gif" "*.ico" "*.svg" "*.woff" "*.woff2" "*.ttf" "*.json"; do
-            for file in $pattern; do
-              if [ -f "$file" ] && [ "$file" != "package.json" ]; then
-                cp "$file" $BUILD_DIR/
-                echo "📄 $file copié"
-              fi
-            done
+          # Copier package.json et autres fichiers importants
+          echo "📄 Copie des fichiers de configuration..."
+          for file in "package.json" "README.md" "LICENSE"; do
+            if [ -f "$file" ]; then
+              cp "$file" $BUILD_DIR/
+              echo "✅ $file copié"
+            fi
           done
           
           # Afficher la structure du build
           echo ""
           echo "📂 Structure du dossier $BUILD_DIR:"
-          find $BUILD_DIR -type f | sort | sed 's/^/  /'
+          find $BUILD_DIR -type f | sort | sed 's/^/  /' | head -30
           echo ""
           echo "📊 Taille totale: $(du -sh $BUILD_DIR | cut -f1)"
 
@@ -288,12 +336,15 @@ jobs:
           echo "  🌿 Branche: ${{ github.ref_name }}"
           echo "  👤 Déclenché par: ${{ github.actor }}"
           echo "  🆔 Execution ID: ${{ github.run_id }}"
+          echo "  📁 Dossier source: ${{ env.SOURCE_DIR }}/"
           echo ""
           echo "📋 Résumé des étapes:"
           echo "  ✅ Code checkout"
           echo "  ✅ Node.js 18 configuré"
           echo "  ✅ Dépendances installées"
+          echo "  ✅ Validation structure projet"
           echo "  ✅ Validation HTML/structure"
+          echo "  ✅ Validation assets"
           echo "  ✅ Exécution des tests"
           echo "  ✅ Build de l'application"
           echo "  📦 Artefact généré: ci-pipeline-build"
