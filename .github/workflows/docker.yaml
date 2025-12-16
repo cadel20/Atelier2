@@ -71,52 +71,95 @@ jobs:
       id: check-dockerfile
       run: |
         echo "🔍 Recherche des fichiers Docker..."
+        echo "=========================================="
         
-        DOCKERFILES=$(find . -name "Dockerfile*" -type f | wc -l)
-        echo "Nombre de Dockerfiles trouvés: $DOCKERFILES"
+        # Méthode 1: Vérifier le fichier Dockerfile à la racine (sensible à la casse)
+        echo "Méthode 1: Recherche de 'Dockerfile' à la racine..."
+        if [ -f "Dockerfile" ]; then
+          echo "✅ Dockerfile trouvé à la racine (D majuscule)"
+          echo "exists=true" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Méthode 2: Vérifier dockerfile (minuscules)
+        echo "Méthode 2: Recherche de 'dockerfile' (minuscules)..."
+        if [ -f "dockerfile" ]; then
+          echo "✅ dockerfile trouvé à la racine (d minuscule)"
+          echo "exists=true" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Méthode 3: Recherche récursive avec différentes orthographes
+        echo "Méthode 3: Recherche récursive..."
+        DOCKERFILES=$(find . -type f \( -name "Dockerfile" -o -name "dockerfile" -o -name "Dockerfile.*" -o -name "*.dockerfile" \) 2>/dev/null | wc -l)
+        echo "Nombre de fichiers Docker trouvés: $DOCKERFILES"
         
         if [ $DOCKERFILES -eq 0 ]; then
           echo "❌ Aucun Dockerfile trouvé"
+          echo ""
+          echo "📋 Contenu du répertoire racine:"
+          ls -la
+          echo ""
+          echo "🔧 Actions recommandées:"
+          echo "1. Créer un Dockerfile à la racine de votre projet"
+          echo "2. Vérifier que le fichier s'appelle 'Dockerfile' ou 'dockerfile'"
+          echo "3. S'assurer qu'il n'y a pas d'erreur de casse"
           echo "exists=false" >> $GITHUB_OUTPUT
           exit 1
         else
-          echo "✅ Dockerfile(s) trouvé(s)"
-          find . -name "Dockerfile*" -type f | sed 's/^/  📄 /'
+          echo "✅ $DOCKERFILES fichier(s) Docker trouvé(s)"
+          find . -type f \( -name "Dockerfile" -o -name "dockerfile" -o -name "Dockerfile.*" -o -name "*.dockerfile" \) 2>/dev/null | sed 's/^/  📄 /'
           echo "exists=true" >> $GITHUB_OUTPUT
         fi
-    
+
     - name: Validate Dockerfile syntax
       id: validate-dockerfile
       run: |
         echo "📋 Validation de la syntaxe Dockerfile..."
         echo "=========================================="
         
-        MAIN_DOCKERFILE="Dockerfile"
-        if [ ! -f "$MAIN_DOCKERFILE" ]; then
-          echo "⚠️  Dockerfile principal non trouvé, recherche alternative..."
-          MAIN_DOCKERFILE=$(find . -name "Dockerfile*" -type f | head -1)
+        # Déterminer le chemin du Dockerfile
+        MAIN_DOCKERFILE=""
+        
+        # Essayer différentes orthographes
+        for filename in "Dockerfile" "dockerfile" "./Dockerfile" "./dockerfile"; do
+          if [ -f "$filename" ]; then
+            MAIN_DOCKERFILE="$filename"
+            break
+          fi
+        done
+        
+        # Si non trouvé, chercher récursivement
+        if [ -z "$MAIN_DOCKERFILE" ]; then
+          MAIN_DOCKERFILE=$(find . -type f \( -name "Dockerfile" -o -name "dockerfile" -o -name "Dockerfile.*" -o -name "*.dockerfile" \) 2>/dev/null | head -1)
+        fi
+        
+        if [ -z "$MAIN_DOCKERFILE" ]; then
+          echo "❌ ERREUR: Aucun Dockerfile trouvé"
+          exit 1
         fi
         
         echo "📄 Analyse de: $MAIN_DOCKERFILE"
+        echo "Taille: $(wc -l < "$MAIN_DOCKERFILE") lignes"
         
         # Vérifier les bonnes pratiques
         VALIDATION_PASSED=true
         
         # 1. Vérifier le FROM
-        if ! head -n 5 "$MAIN_DOCKERFILE" | grep -q "FROM"; then
+        if ! head -n 10 "$MAIN_DOCKERFILE" | grep -iq "FROM"; then
           echo "❌ ERREUR: Instruction FROM manquante"
           VALIDATION_PASSED=false
         else
-          FROM_LINE=$(grep -m 1 "FROM" "$MAIN_DOCKERFILE")
+          FROM_LINE=$(grep -i -m 1 "FROM" "$MAIN_DOCKERFILE")
           echo "✅ FROM: $FROM_LINE"
           
           # Vérifier si c'est une image officielle
-          if echo "$FROM_LINE" | grep -q "alpine\|slim\|buster\|bullseye"; then
+          if echo "$FROM_LINE" | grep -iq "alpine\|slim\|buster\|bullseye"; then
             echo "✅ Image de base légère détectée"
-          elif echo "$FROM_LINE" | grep -q "node:\|python:\|nginx:\|httpd:"; then
+          elif echo "$FROM_LINE" | grep -iq "node:\|python:\|nginx:\|httpd:"; then
             echo "✅ Image de base officielle détectée"
           else
-            echo "⚠️  Image de base non standard"
+            echo "ℹ️  Image de base: $(echo "$FROM_LINE" | sed 's/FROM //i')"
           fi
         fi
         
@@ -124,32 +167,40 @@ jobs:
         echo ""
         echo "📁 Vérification de la copie des fichiers..."
         
-        if grep -q "COPY.*${{ env.SOURCE_DIR }}" "$MAIN_DOCKERFILE" || grep -q "ADD.*${{ env.SOURCE_DIR }}" "$MAIN_DOCKERFILE"; then
+        if grep -iq "COPY.*${{ env.SOURCE_DIR }}" "$MAIN_DOCKERFILE" || grep -iq "ADD.*${{ env.SOURCE_DIR }}" "$MAIN_DOCKERFILE"; then
           echo "✅ Le Dockerfile copie les fichiers depuis ${{ env.SOURCE_DIR }}/"
         else
           echo "⚠️  Le Dockerfile ne copie pas explicitement ${{ env.SOURCE_DIR }}/"
-          echo "   Il devrait contenir: COPY ${{ env.SOURCE_DIR }}/ /usr/share/nginx/html/"
+          echo "   Recommandation: Ajouter 'COPY ${{ env.SOURCE_DIR }}/ /usr/share/nginx/html/'"
+          
+          # Vérifier s'il copie d'autres répertoires
+          COPY_LINES=$(grep -i "COPY\|ADD" "$MAIN_DOCKERFILE")
+          if [ -n "$COPY_LINES" ]; then
+            echo "   Instructions COPY/ADD trouvées:"
+            echo "$COPY_LINES" | sed 's/^/     /'
+          fi
         fi
         
         # 3. Vérifier les instructions essentielles
         echo ""
         echo "🔧 Vérification des instructions..."
         
-        if grep -q "WORKDIR" "$MAIN_DOCKERFILE"; then
-          echo "✅ WORKDIR défini"
+        if grep -iq "WORKDIR" "$MAIN_DOCKERFILE"; then
+          WORKDIR_LINE=$(grep -i "WORKDIR" "$MAIN_DOCKERFILE" | tail -1)
+          echo "✅ WORKDIR: $WORKDIR_LINE"
         else
-          echo "⚠️  WORKDIR non défini (bonne pratique)"
+          echo "ℹ️  WORKDIR non défini (optionnel pour les images simples)"
         fi
         
-        if grep -q "EXPOSE" "$MAIN_DOCKERFILE"; then
-          PORTS=$(grep "EXPOSE" "$MAIN_DOCKERFILE" | sed 's/EXPOSE //')
+        if grep -iq "EXPOSE" "$MAIN_DOCKERFILE"; then
+          PORTS=$(grep -i "EXPOSE" "$MAIN_DOCKERFILE" | sed 's/EXPOSE //i')
           echo "✅ EXPOSE: $PORTS"
         else
-          echo "⚠️  EXPOSE non défini (bonne pratique)"
+          echo "⚠️  EXPOSE non défini (recommandé pour les images web)"
         fi
         
-        if grep -q "USER" "$MAIN_DOCKERFILE"; then
-          USER_LINE=$(grep "USER" "$MAIN_DOCKERFILE" | tail -1)
+        if grep -iq "USER" "$MAIN_DOCKERFILE"; then
+          USER_LINE=$(grep -i "USER" "$MAIN_DOCKERFILE" | tail -1)
           echo "✅ USER: $USER_LINE"
         else
           echo "⚠️  USER non défini (sécurité recommandée)"
@@ -159,9 +210,9 @@ jobs:
         echo ""
         echo "🔒 Vérification de sécurité..."
         
-        if grep -q "apt-get update && apt-get install" "$MAIN_DOCKERFILE"; then
+        if grep -iq "apt-get update && apt-get install" "$MAIN_DOCKERFILE"; then
           echo "✅ Installation APT optimisée"
-        elif grep -q "apt-get install" "$MAIN_DOCKERFILE" && ! grep -q "apt-get update" "$MAIN_DOCKERFILE"; then
+        elif grep -iq "apt-get install" "$MAIN_DOCKERFILE" && ! grep -iq "apt-get update" "$MAIN_DOCKERFILE"; then
           echo "⚠️  APT install sans update (cache potentiel)"
         fi
         
@@ -175,15 +226,18 @@ jobs:
           VALIDATION_PASSED=false
         fi
         
-        # 5. Vérifier la taille
+        # 5. Vérifier CMD ou ENTRYPOINT
         echo ""
-        echo "📏 Analyse de la taille..."
+        echo "🚀 Vérification de la commande..."
         
-        LINES=$(wc -l < "$MAIN_DOCKERFILE")
-        echo "Nombre de lignes: $LINES"
-        
-        if [ $LINES -gt 100 ]; then
-          echo "⚠️  Dockerfile volumineux (>100 lignes) - optimisation recommandée"
+        if grep -iq "CMD" "$MAIN_DOCKERFILE"; then
+          CMD_LINE=$(grep -i "CMD" "$MAIN_DOCKERFILE" | tail -1)
+          echo "✅ CMD: $CMD_LINE"
+        elif grep -iq "ENTRYPOINT" "$MAIN_DOCKERFILE"; then
+          ENTRYPOINT_LINE=$(grep -i "ENTRYPOINT" "$MAIN_DOCKERFILE" | tail -1)
+          echo "✅ ENTRYPOINT: $ENTRYPOINT_LINE"
+        else
+          echo "⚠️  Ni CMD ni ENTRYPOINT définis"
         fi
         
         # 6. Résumé
@@ -203,8 +257,8 @@ jobs:
         
         if [ -f ".dockerignore" ]; then
           echo "✅ .dockerignore présent"
-          echo "Contenu:"
-          cat .dockerignore | sed 's/^/  📝 /'
+          echo "Contenu (premières lignes):"
+          head -20 .dockerignore | sed 's/^/  📝 /'
           
           # Vérifier les patterns essentiels
           ESSENTIAL_PATTERNS=("node_modules" ".git" ".DS_Store" "*.log" "*.tmp")
@@ -212,12 +266,16 @@ jobs:
             if grep -q "$pattern" .dockerignore; then
               echo "✅ '$pattern' ignoré"
             else
-              echo "⚠️  '$pattern' non ignoré"
+              echo "ℹ️  '$pattern' non ignoré"
             fi
           done
         else
-          echo "⚠️  .dockerignore manquant - l'image sera plus grande"
-          echo "Conseil: créez un .dockerignore avec node_modules, .git, etc."
+          echo "ℹ️  .dockerignore manquant - création recommandée"
+          echo "   Exemple de contenu:"
+          echo "   .git/"
+          echo "   node_modules/"
+          echo "   *.log"
+          echo "   *.tmp"
         fi
 
     - name: Create Docker validation report
@@ -230,7 +288,7 @@ jobs:
         ## Statut: $(if [ "${{ steps.validate-dockerfile.outputs.valid }}" = "true" ]; then echo "✅ VALIDE"; else echo "❌ INVALIDE"; fi)
         
         ## Fichiers Docker
-        $(find . -name "Dockerfile*" -type f -exec echo "- \`{}\`" \;)
+        $(find . -type f \( -name "Dockerfile" -o -name "dockerfile" -o -name "Dockerfile.*" -o -name "*.dockerfile" \) 2>/dev/null -exec echo "- \`{}\`" \;)
         
         ## Structure du Projet
         - ✅ Dossier source: ${{ env.SOURCE_DIR }}/
