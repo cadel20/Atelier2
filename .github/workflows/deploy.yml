@@ -97,15 +97,15 @@ jobs:
         
         # Vérifier la taille totale
         echo "📏 Analyse de la taille du projet..."
-        TOTAL_SIZE=$(find "${{ env.SOURCE_DIR }}" -type f -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" 2>/dev/null | xargs stat -f%z 2>/dev/null | awk '{sum+=$1} END {print sum}')
+        TOTAL_SIZE=0
         
-        if [ -z "$TOTAL_SIZE" ]; then
-          TOTAL_SIZE=$(find "${{ env.SOURCE_DIR }}" -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) -exec stat -c%s {} + 2>/dev/null | awk '{sum+=$1} END {print sum}')
-        fi
-        
-        if [ -z "$TOTAL_SIZE" ]; then
-          TOTAL_SIZE=0
-        fi
+        # Calculer la taille des fichiers principaux
+        for file in $(find "${{ env.SOURCE_DIR }}" \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) -type f 2>/dev/null); do
+          if [ -f "$file" ]; then
+            size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
+            TOTAL_SIZE=$((TOTAL_SIZE + size))
+          fi
+        done
         
         echo "Taille totale des assets: $((TOTAL_SIZE / 1024)) KB"
         
@@ -113,13 +113,40 @@ jobs:
           echo "⚠️  ATTENTION: Taille totale > 100MB - GitHub Pages a des limites"
         fi
         
-        # Vérifier les liens externes - VERSION CORRIGÉE
+        # Vérifier les liens externes - SOLUTION CORRIGÉE
         echo ""
         echo "🔗 Vérification des liens externes..."
         
-        # Méthode plus précise qui ignore les data URIs et les attributs XML
         HTTP_INSECURE_FOUND=false
         FILES_CHECKED=0
+        
+        # Fonction pour vérifier si une ligne contient un vrai lien HTTP problématique
+        check_http_line() {
+          local line="$1"
+          
+          # Ignorer complètement les data URIs
+          if [[ "$line" == *"data:image/svg+xml"* ]] || \
+             [[ "$line" == *"data:image/"* ]] || \
+             [[ "$line" == *"data:text/"* ]] || \
+             [[ "$line" == *"data:application/"* ]]; then
+            return 1  # C'est un data URI - ignorer
+          fi
+          
+          # Ignorer les URLs locales
+          if [[ "$line" == *"http://localhost"* ]] || \
+             [[ "$line" == *"http://127.0.0.1"* ]] || \
+             [[ "$line" == *"http://0.0.0.0"* ]]; then
+            return 1  # C'est local - ignorer
+          fi
+          
+          # Chercher spécifiquement les URLs HTTP vers des domaines externes
+          # Pattern: http:// suivi d'un nom de domaine (pas data:)
+          if echo "$line" | grep -q -E 'http://[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}'; then
+            return 0  # Vrai lien HTTP externe trouvé
+          fi
+          
+          return 1  # Pas de lien HTTP externe
+        }
         
         # Parcourir tous les fichiers HTML, CSS et JS
         for file in $(find "${{ env.SOURCE_DIR }}" \( -name "*.html" -o -name "*.css" -o -name "*.js" \) -type f 2>/dev/null); do
@@ -130,37 +157,24 @@ jobs:
           while IFS= read -r line; do
             line_number=$((line_number + 1))
             
-            # Chercher des URLs HTTP dans la ligne
-            # Pattern pour trouver http:// suivi de caractères non-espace
-            if echo "$line" | grep -q -E 'http://[^"'' <>]*'; then
-              
-              # Ignorer les cas spécifiques (faux positifs)
-              # 1. Data URIs (data:image/svg+xml,...)
-              # 2. Localhost
-              # 3. Attrbuts XML dans les SVGs
-              # 4. Commentaires
-              if echo "$line" | grep -q -E 'data:image/[^;]+;base64,' && \
-                 echo "$line" | grep -q 'xmlns="http://www.w3.org/2000/svg"'; then
-                # C'est un data URI avec SVG - ignorer
-                continue
-              elif echo "$line" | grep -q 'http://localhost' || \
-                   echo "$line" | grep -q 'http://127.0.0.1' || \
-                   echo "$line" | grep -q 'http://0.0.0.0'; then
-                # URLs locales - ignorer
-                continue
-              elif echo "$line" | grep -q -E '^\s*//' || \
-                   echo "$line" | grep -q -E '^\s*/\*' || \
-                   echo "$line" | grep -q -E '\*/$'; then
-                # Lignes de commentaires - ignorer
-                continue
-              else
-                # Vrai lien HTTP non sécurisé trouvé
-                echo "⚠️  Lien HTTP non sécurisé détecté:"
-                echo "   Fichier: $file (ligne $line_number)"
-                echo "   Contenu: ${line:0:80}..."
-                HTTP_INSECURE_FOUND=true
-              fi
+            # Ignorer les lignes de commentaires
+            trimmed_line=$(echo "$line" | xargs)
+            if [[ -z "$trimmed_line" ]] || \
+               [[ "$trimmed_line" == "//"* ]] || \
+               [[ "$trimmed_line" == "/*"* ]] || \
+               [[ "$trimmed_line" == "*"* ]] || \
+               [[ "$trimmed_line" == "<!--"* ]]; then
+              continue
             fi
+            
+            # Vérifier la ligne pour des liens HTTP problématiques
+            if check_http_line "$line"; then
+              echo "⚠️  Lien HTTP non sécurisé détecté:"
+              echo "   Fichier: $file (ligne $line_number)"
+              echo "   Contenu: ${line:0:100}..."
+              HTTP_INSECURE_FOUND=true
+            fi
+            
           done < "$file"
         done
         
