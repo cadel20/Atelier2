@@ -113,77 +113,50 @@ jobs:
           echo "⚠️  ATTENTION: Taille totale > 100MB - GitHub Pages a des limites"
         fi
         
-        # Vérifier les liens externes - SOLUTION CORRIGÉE
+        # Vérifier les liens externes - SOLUTION SIMPLIFIÉE ET CORRECTE
         echo ""
         echo "🔗 Vérification des liens externes..."
         
-        HTTP_INSECURE_FOUND=false
-        FILES_CHECKED=0
+        # Solution simplifiée qui ignore correctement les data URIs
+        HTTP_LINKS_FOUND=false
         
-        # Fonction pour vérifier si une ligne contient un vrai lien HTTP problématique
-        check_http_line() {
-          local line="$1"
-          
-          # Ignorer complètement les data URIs
-          if [[ "$line" == *"data:image/svg+xml"* ]] || \
-             [[ "$line" == *"data:image/"* ]] || \
-             [[ "$line" == *"data:text/"* ]] || \
-             [[ "$line" == *"data:application/"* ]]; then
-            return 1  # C'est un data URI - ignorer
-          fi
-          
-          # Ignorer les URLs locales
-          if [[ "$line" == *"http://localhost"* ]] || \
-             [[ "$line" == *"http://127.0.0.1"* ]] || \
-             [[ "$line" == *"http://0.0.0.0"* ]]; then
-            return 1  # C'est local - ignorer
-          fi
-          
-          # Chercher spécifiquement les URLs HTTP vers des domaines externes
-          # Pattern: http:// suivi d'un nom de domaine (pas data:)
-          if echo "$line" | grep -q -E 'http://[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}'; then
-            return 0  # Vrai lien HTTP externe trouvé
-          fi
-          
-          return 1  # Pas de lien HTTP externe
-        }
-        
-        # Parcourir tous les fichiers HTML, CSS et JS
+        # Chercher uniquement les vrais liens HTTP vers des domaines externes
+        # Ignorer data: URLs, localhost, et attributs XML
         for file in $(find "${{ env.SOURCE_DIR }}" \( -name "*.html" -o -name "*.css" -o -name "*.js" \) -type f 2>/dev/null); do
-          FILES_CHECKED=$((FILES_CHECKED + 1))
-          
-          # Analyser chaque ligne du fichier
-          line_number=0
+          # Analyser le fichier pour trouver des URLs HTTP problématiques
+          line_num=0
           while IFS= read -r line; do
-            line_number=$((line_number + 1))
+            line_num=$((line_num + 1))
             
-            # Ignorer les lignes de commentaires
-            trimmed_line=$(echo "$line" | xargs)
-            if [[ -z "$trimmed_line" ]] || \
-               [[ "$trimmed_line" == "//"* ]] || \
-               [[ "$trimmed_line" == "/*"* ]] || \
-               [[ "$trimmed_line" == "*"* ]] || \
-               [[ "$trimmed_line" == "<!--"* ]]; then
+            # Ignorer les data URIs complètement
+            if [[ "$line" == *"data:"* ]]; then
               continue
             fi
             
-            # Vérifier la ligne pour des liens HTTP problématiques
-            if check_http_line "$line"; then
-              echo "⚠️  Lien HTTP non sécurisé détecté:"
-              echo "   Fichier: $file (ligne $line_number)"
-              echo "   Contenu: ${line:0:100}..."
-              HTTP_INSECURE_FOUND=true
+            # Ignorer les URLs locales
+            if [[ "$line" == *"http://localhost"* ]] || \
+               [[ "$line" == *"http://127.0.0.1"* ]] || \
+               [[ "$line" == *"http://0.0.0.0"* ]]; then
+              continue
             fi
             
+            # Chercher les URLs HTTP vers des domaines
+            # Pattern: http:// suivi d'un domaine (lettres, chiffres, tirets, point)
+            if echo "$line" | grep -q -E 'http://[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'; then
+              echo "⚠️  Lien HTTP non sécurisé détecté:"
+              echo "   Fichier: $file (ligne $line_num)"
+              echo "   Contenu: ${line:0:80}..."
+              HTTP_LINKS_FOUND=true
+            fi
           done < "$file"
         done
         
-        if [ "$HTTP_INSECURE_FOUND" = true ]; then
+        if [ "$HTTP_LINKS_FOUND" = true ]; then
           echo ""
           echo "🔧 Recommandation:"
           echo "   Remplacer les liens 'http://' par 'https://' pour une meilleure sécurité"
         else
-          echo "✅ Aucun lien HTTP non sécurisé détecté ($FILES_CHECKED fichiers analysés)"
+          echo "✅ Aucun lien HTTP non sécurisé détecté"
         fi
         
         # Vérifier les erreurs 404 potentielles
@@ -314,7 +287,7 @@ jobs:
         echo "📊 Création du rapport de déploiement..."
         echo "=========================================="
         
-        TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+        TIMESTAMP=$(date +"%Y-%m-d %H:%M:%S")
         COMMIT_HASH=$(git rev-parse --short HEAD)
         COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
         COMMIT_MESSAGE=$(git log -1 --pretty=format:'%s')
