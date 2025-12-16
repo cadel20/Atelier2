@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline CI/CD DevOps - Votre Projet</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/responsive.css">
+    <link rel="icon" href="/images/logo.svg" type="image/svg+xml">
+</head>
+<body>
+    <!-- Status Bar Live -->
+    <div class="status-bar">
+        <div class="status-item">
+            <div class="status-dot"></div>
+            <span>Système CI/CD: <strong id="system-status">ACTIF</strong></span>
+        </div>
+        <div class="status-item">
+            <i class="fas fa-clock"></i>
+            <span>Temps réel: <span id="live-timer">00:00:00</span></span>
+        </div>
+        <div class="status-item">
+            <div class="status-dot warning"></div>
+            <span>Dernier déploiement: <span id="last-deploy">En cours...</span></span>
+        </div>
+        <div class="status-item">
+            <i class="fas fa-server"></i>
+            <span>Environnement: <strong id="environment-status">PRODUCTION</strong></span>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="container nav-container">
+            <a href="#home" class="nav-brand">
+                <i class="fas fa-code-branch"></i>
+                DevOps Pipeline
+            </a>
+            
+            <button class="mobile-menu-btn" onclick="toggleMenu()">
+                <i class="fas fa-bars"></i>
+            </button>
+            
+            <ul class="nav-menu" id="navMenu">
+                <li><a href="#home" class="active"><i class="fas fa-home"></i> Accueil</a></li>
+                <li><a href="#project"><i class="fas fa-project-diagram"></i> Projet</a></li>
+                <li><a href="#timeline"><i class="fas fa-history"></i> Chronologie</a></li>
+                <li><a href="#team"><i class="fas fa-users"></i> Équipe</a></li>
+                <li><a href="#metrics"><i class="fas fa-chart-line"></i> Métriques</a></li>
+                <li><a href="#demo"><i class="fas fa-code"></i> Démo</a></li>
+                <li><a href="#contact"><i class="fas fa-envelope"></i> Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <div class="hero-text fade-in">
+                    <h1>Pipeline CI/CD DevOps</h1>
+                    <p>Implémentation complète d'un pipeline d'intégration et déploiement continu avec GitHub Actions, Docker et déploiement automatique.</p>
+                    
+                    <div class="hero-buttons">
+                        <a href="#demo" class="btn">
+                            <i class="fas fa-play-circle"></i> Voir la Démo
+                        </a>
+                        <a href="https://github.com/Thaumy/Atelier" target="_blank" class="btn btn-outline">
+                            <i class="fab fa-github"></i> Code Source
+                        </a>
+                        <a href="#contact" class="btn btn-secondary">
+                            <i class="fas fa-rocket"></i> Démo Live
+                        </a>
+                    </div>
+                    
+                    <div class="tech-stack" style="margin-top: 30px;">
+                        <p style="font-size: 0.9rem; color: var(--gray); margin-bottom: 10px;">Stack technique :</p>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <span style="background: rgba(37, 99, 235, 0.1); color: var(--primary); padding: 8px 15px; border-radius: 20px; font-size: 0.9rem;">
+                                <i class="fab fa-github"></i> GitHub Actions
+                            </span>
+                            <span style="background: rgba(36, 150, 237, 0.1); color: #2496ed; padding: 8px 15px; border-radius: 20px; font-size: 0.9rem;">
+                                <i class="fab fa-docker"></i> Docker
+                            </span>
+                            <span style="background: rgba(247, 223, 30, 0.1); color: #f7df1e; padding: 8px 15px; border-radius: 20px; font-size: 0.9rem;">
+                                <i class="fab fa-js"></i> JavaScript
+                            </span>
+                            <span style="background: rgba(16, 185, 129, 0.1); color: var(--secondary); padding: 8px 15px; border-radius: 20px; font-size: 0.9rem;">
+                                <i class="fas fa-server"></i> Nginx
+                            </span>
+                            <span style="background: rgba(139, 92, 246, 0.1); color: var(--accent); padding: 8px 15px; border-radius: 20px; font-size: 0.9rem;">
+                                <i class="fab fa-linux"></i> Ubuntu
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="hero-visual fade-in">
+                    <div class="pipeline-animation">
+                        <h3 style="margin-bottom: 20px; color: var(--primary);">
+                            <i class="fas fa-sync-alt"></i> Pipeline en temps réel
+                        </h3>
+                        
+                        <div class="pipeline-step active" id="step1">
+                            <i class="fas fa-code"></i>
+                            <div>
+                                <strong>Commit du code</strong>
+                                <p style="font-size: 0.9rem; margin: 0; color: var(--gray);">Développeur push sur GitHub</p>
+                            </div>
+                            <span style="margin-left: auto; font-size: 0.8rem; color: var(--secondary);">
+                                <i class="fas fa-check-circle"></i> Actif
+                            </span>
+                        </div>
+                        
+                        <div class="pipeline-step" id="step2">
+                            <i class="fas fa-check-circle"></i>
+                            <div>
+                                <strong>Tests automatisés</strong>
+                                <p style="font-size: 0.9rem; margin: 0; color: var(--gray);">Validation qualité du code</p>
+                            </div>
+                            <span style="margin-left: auto; font-size: 0.8rem; color: var(--gray);">
+                                <i class="fas fa-clock"></i> En attente
+                            </span>
+                        </div>
+                        
+                        <div class="pipeline-step" id="step3">
+                            <i class="fas fa-docker"></i>
+                            <div>
+                                <strong>Build Docker</strong>
+                                <p style="font-size: 0.9rem; margin: 0; color: var(--gray);">Création de l'image</p>
+                            </div>
+                            <span style="margin-left: auto; font-size: 0.8rem; color: var(--gray);">
+                                <i class="fas fa-clock"></i> En attente
+                            </span>
+                        </div>
+                        
+                        <div class="pipeline-step" id="step4">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <div>
+                                <strong>Déploiement</strong>
+                                <p style="font-size: 0.9rem; margin: 0; color: var(--gray);">Mise en production</p>
+                            </div>
+                            <span style="margin-left: auto; font-size: 0.8rem; color: var(--gray);">
+                                <i class="fas fa-clock"></i> En attente
+                            </span>
+                        </div>
+
+                        <div class="pipeline-progress">
+                            <div class="pipeline-progress-bar" id="pipeline-progress"></div>
+                        </div>
+
+                        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(0,0,0,0.1);">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: var(--gray);">
+                                <span><i class="fas fa-history"></i> Dernière exécution</span>
+                                <span id="pipeline-last-run">Aujourd'hui, 10:30</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: var(--gray); margin-top: 5px;">
+                                <span><i class="fas fa-bolt"></i> Prochaine exécution</span>
+                                <span id="pipeline-next-run">Sur commit</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Project Section -->
+    <section id="project" class="project">
+        <div class="container">
+            <h2>Notre Projet CI/CD</h2>
+            <p class="section-subtitle">
+                Une implémentation complète des pratiques DevOps avec automatisation de bout en bout. 
+                Ce projet démontre l'intégration continue, le déploiement continu et l'orchestration 
+                des conteneurs dans un pipeline automatisé.
+            </p>
+            
+            <div class="metrics">
+                <h3 style="color: var(--primary); margin-bottom: 20px;">
+                    <i class="fas fa-chart-bar"></i> Métriques du Projet
+                </h3>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <i class="fas fa-code-branch" style="font-size: 2rem; color: var(--primary);"></i>
+                        <div class="metric-value" id="commits-count">47</div>
+                        <div class="metric-label">Commits GitHub</div>
+                    </div>
+                    <div class="metric-card">
+                        <i class="fas fa-check-circle" style="font-size: 2rem; color: var(--secondary);"></i>
+                        <div class="metric-value" id="builds-count">12</div>
+                        <div class="metric-label">Builds réussis</div>
+                    </div>
+                    <div class="metric-card">
+                        <i class="fas fa-docker" style="font-size: 2rem; color: #2496ed;"></i>
+                        <div class="metric-value" id="docker-pulls">156</div>
+                        <div class="metric-label">Pulls Docker</div>
+                    </div>
+                    <div class="metric-card">
+                        <i class="fas fa-clock" style="font-size: 2rem; color: var(--accent);"></i>
+                        <div class="metric-value" id="uptime-percent">99.8%</div>
+                        <div class="metric-label">Disponibilité</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Timeline Section -->
+    <section id="timeline" class="timeline-section" style="background: #f8fafc;">
+        <div class="container">
+            <h2>Chronologie du Projet</h2>
+            <p class="section-subtitle">
+                Évolution et jalons de notre implémentation CI/CD depuis le début du projet.
+            </p>
+            
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-date">Semaine 1</div>
+                    <div class="timeline-content">
+                        <h4><i class="fas fa-rocket"></i> Initialisation du projet</h4>
+                        <p>Création du dépôt GitHub, configuration des branches main/dev, et mise en place de la structure de base.</p>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <span style="background: rgba(37, 99, 235, 0.1); color: var(--primary); padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                GitHub
+                            </span>
+                            <span style="background: rgba(16, 185, 129, 0.1); color: var(--secondary); padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                Git
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="timeline-item">
+                    <div class="timeline-date">Semaine 2</div>
+                    <div class="timeline-content">
+                        <h4><i class="fas fa-cogs"></i> Configuration CI</h4>
+                        <p>Implémentation du workflow GitHub Actions pour les tests automatiques et validation du code.</p>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <span style="background: rgba(37, 99, 235, 0.1); color: var(--primary); padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                GitHub Actions
+                            </span>
+                            <span style="background: rgba(247, 223, 30, 0.1); color: #f7df1e; padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                Node.js
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="timeline-item">
+                    <div class="timeline-date">Semaine 3</div>
+                    <div class="timeline-content">
+                        <h4><i class="fas fa-docker"></i> Containerisation</h4>
+                        <p>Création du Dockerfile et intégration du build Docker dans le pipeline CI/CD.</p>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <span style="background: rgba(36, 150, 237, 0.1); color: #2496ed; padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                Docker
+                            </span>
+                            <span style="background: rgba(139, 92, 246, 0.1); color: var(--accent); padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                Nginx
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="timeline-item">
+                    <div class="timeline-date">Semaine 4</div>
+                    <div class="timeline-content">
+                        <h4><i class="fas fa-cloud-upload-alt"></i> Déploiement Automatique</h4>
+                        <p>Configuration du déploiement continu vers le serveur de production avec validation automatique.</p>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <span style="background: rgba(239, 68, 68, 0.1); color: #ef4444; padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                SSH
+                            </span>
+                            <span style="background: rgba(16, 185, 129, 0.1); color: var(--secondary); padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                Automatisation
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="timeline-item">
+                    <div class="timeline-date">Aujourd'hui</div>
+                    <div class="timeline-content">
+                        <h4><i class="fas fa-chart-line"></i> Monitoring & Amélioration</h4>
+                        <p>Mise en place des dashboards de monitoring et optimisation des performances du pipeline.</p>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <span style="background: rgba(139, 92, 246, 0.1); color: var(--accent); padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                Analytics
+                            </span>
+                            <span style="background: rgba(37, 99, 235, 0.1); color: var(--primary); padding: 3px 10px; border-radius: 15px; font-size: 0.8rem;">
+                                Logs
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Team Section -->
+    <section id="team" class="team-section">
+        <div class="container">
+            <h2>Notre Équipe DevOps</h2>
+            <p class="section-subtitle">
+                L'équipe dédiée au développement et à la maintenance de notre pipeline CI/CD.
+            </p>
+            
+            <div class="team-grid">
+                <div class="team-card fade-in">
+                    <div class="team-header">
+                        <div class="team-avatar">
+                            <i class="fas fa-user-tie"></i>
+                        </div>
+                        <h3>Thaumy</h3>
+                        <p class="team-role">Lead DevOps Engineer</p>
+                    </div>
+                    <div class="team-content">
+                        <p>Architecture du pipeline, configuration Docker et orchestration des déploiements.</p>
+                        <div class="info-item" style="margin-top: 15px;">
+                            <i class="fas fa-envelope"></i>
+                            <span>thaumy@example.com</span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fab fa-github"></i>
+                            <span>github.com/Thaumy</span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-code-branch"></i>
+                            <span>Main repositories: Atelier, CI/CD-Tools</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="team-card fade-in">
+                    <div class="team-header">
+                        <div class="team-avatar" style="color: var(--secondary);">
+                            <i class="fas fa-code"></i>
+                        </div>
+                        <h3>cadel Developer</h3>
+                        <p class="team-role">Full Stack Developer</p>
+                    </div>
+                    <div class="team-content">
+                        <p>Développement des applications, tests automatisés et intégration continue.</p>
+                        <div class="info-item" style="margin-top: 15px;">
+                            <i class="fas fa-envelope"></i>
+                            <span>cadel@example.com</span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fab fa-git-alt"></i>
+                            <span>Git expert & Code Review</span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-vial"></i>
+                            <span>Tests unitaires & intégration</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="team-card fade-in">
+                    <div class="team-header">
+                        <div class="team-avatar" style="color: var(--accent);">
+                            <i class="fas fa-server"></i>
+                        </div>
+                        <h3>stelphin SysAdmin</h3>
+                        <p class="team-role">Infrastructure Manager</p>
+                    </div>
+                    <div class="team-content">
+                        <p>Gestion des serveurs, monitoring et sécurité de l'environnement de production.</p>
+                        <div class="info-item" style="margin-top: 15px;">
+                            <i class="fas fa-envelope"></i>
+                            <span>stelphin@example.com</span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-shield-alt"></i>
+                            <span>Sécurité & Certifications</span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-chart-bar"></i>
+                            <span>Monitoring & Performance</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Metrics Section -->
+    <section id="metrics" class="metrics-section" style="background: linear-gradient(135deg, #f6f9ff 0%, #eef2ff 100%);">
+        <div class="container">
+            <h2>Métriques en Temps Réel</h2>
+            <p class="section-subtitle">
+                Surveillance des performances et de la santé du pipeline CI/CD.
+            </p>
+            
+            <div class="metrics fade-in">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                    <div>
+                        <h3 style="color: var(--primary); margin-bottom: 20px;">
+                            <i class="fas fa-tachometer-alt"></i> Performance du Pipeline
+                        </h3>
+                        
+                        <div class="metrics-container">
+                            <div class="metric-item">
+                                <div style="font-size: 0.9rem; color: var(--gray);">Temps moyen d'exécution</div>
+                                <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary);" id="avg-execution-time">2m 34s</div>
+                            </div>
+                            <div class="metric-item">
+                                <div style="font-size: 0.9rem; color: var(--gray);">Taux de succès</div>
+                                <div style="font-size: 1.5rem; font-weight: 700; color: var(--secondary);" id="success-rate">98.7%</div>
+                            </div>
+                            <div class="metric-item">
+                                <div style="font-size: 0.9rem; color: var(--gray);">Latence</div>
+                                <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);" id="latency">142ms</div>
+                            </div>
+                            <div class="metric-item">
+                                <div style="font-size: 0.9rem; color: var(--gray);">Débit</div>
+                                <div style="font-size: 1.5rem; font-weight: 700; color: #3b82f6;" id="throughput">12/min</div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 30px;">
+                            <h4 style="color: var(--dark); margin-bottom: 15px;">Statut des Services</h4>
+                            <div id="services-status" style="display: flex; flex-direction: column; gap: 10px;">
+                                <!-- Dynamiquement rempli par JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h3 style="color: var(--primary); margin-bottom: 20px;">
+                            <i class="fas fa-chart-line"></i> Historique des Déploiements
+                        </h3>
+                        
+                        <div style="background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid rgba(0,0,0,0.05);">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+                                <span style="font-weight: 600;">Derniers déploiements</span>
+                                <span style="font-size: 0.9rem; color: var(--gray);">24 dernières heures</span>
+                            </div>
+                            
+                            <div id="deployments-history" style="display: flex; flex-direction: column; gap: 10px;">
+                                <!-- Dynamiquement rempli par JavaScript -->
+                            </div>
+                        </div>
+                        
+                        <div style="background: white; border-radius: 10px; padding: 20px; border: 1px solid rgba(0,0,0,0.05);">
+                            <h4 style="color: var(--dark); margin-bottom: 15px;">Alertes Actives</h4>
+                            <div id="active-alerts">
+                                <div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: #fef2f2; border-radius: 8px; margin-bottom: 10px;">
+                                    <i class="fas fa-exclamation-triangle" style="color: #ef4444;"></i>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600;">Latence élevée détectée</div>
+                                        <div style="font-size: 0.85rem; color: var(--gray);">Serveur de staging - 15 min</div>
+                                    </div>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: #fffbeb; border-radius: 8px;">
+                                    <i class="fas fa-exclamation-circle" style="color: #f59e0b;"></i>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600;">Utilisation CPU élevée</div>
+                                        <div style="font-size: 0.85rem; color: var(--gray);">Container Docker - 85%</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Demo Section -->
+    <section id="demo" class="demo-section" style="background: #f8fafc;">
+        <div class="container">
+            <h2>Démonstration Interactive</h2>
+            <p class="section-subtitle">
+                Simulez un pipeline CI/CD complet avec des scénarios réalistes.
+            </p>
+            
+            <div class="metrics fade-in">
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 30px; align-items: start;">
+                    <div>
+                        <h3 style="color: var(--primary); margin-bottom: 20px;">
+                            <i class="fas fa-play-circle"></i> Simulation du Pipeline
+                        </h3>
+                        
+                        <div style="background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid rgba(0,0,0,0.05);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <h4 style="color: var(--dark);">Workflow GitHub Actions</h4>
+                                <div style="display: flex; gap: 10px;">
+                                    <button id="trigger-pipeline" class="btn" style="padding: 8px 20px; font-size: 0.9rem;">
+                                        <i class="fas fa-play"></i> Lancer le Pipeline
+                                    </button>
+                                    <button id="simulate-error" class="btn btn-outline" style="padding: 8px 20px; font-size: 0.9rem; border-color: #ef4444; color: #ef4444;">
+                                        <i class="fas fa-bug"></i> Simuler Erreur
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div style="background: #1a1a1a; color: white; padding: 15px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 0.85rem; margin-bottom: 15px; min-height: 150px;">
+                                <div id="terminal-output">
+                                    <div class="terminal-line">$ git push origin main</div>
+                                    <div class="terminal-line terminal-info">[INFO] Pushing to main branch...</div>
+                                    <div class="terminal-line terminal-success">✓ Successfully pushed commit: a1b2c3d</div>
+                                    <div class="terminal-line terminal-info">[INFO] Triggering GitHub Actions workflow...</div>
+                                </div>
+                                <div id="pipeline-output" class="simulation-log"></div>
+                            </div>
+                            
+                            <div class="pipeline-progress">
+                                <div class="pipeline-progress-bar" id="demo-progress"></div>
+                            </div>
+                            
+                            <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-top: 20px;">
+                                <button id="step-test" class="btn btn-outline" style="padding: 8px 15px; font-size: 0.85rem;">
+                                    <i class="fas fa-vial"></i> Exécuter Tests
+                                </button>
+                                <button id="step-build" class="btn btn-outline" style="padding: 8px 15px; font-size: 0.85rem;">
+                                    <i class="fas fa-docker"></i> Build Docker
+                                </button>
+                                <button id="step-deploy" class="btn btn-outline" style="padding: 8px 15px; font-size: 0.85rem;">
+                                    <i class="fas fa-cloud-upload-alt"></i> Déployer
+                                </button>
+                                <button id="reset-pipeline" class="btn btn-outline" style="padding: 8px 15px; font-size: 0.85rem; color: #ef4444; border-color: #ef4444;">
+                                    <i class="fas fa-redo"></i> Réinitialiser
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div style="background: white; border-radius: 10px; padding: 20px; border: 1px solid rgba(0,0,0,0.05);">
+                            <h4 style="color: var(--dark); margin-bottom: 15px;">
+                                <i class="fas fa-code"></i> Code du Pipeline (extrait)
+                            </h4>
+                            <pre style="background: #f8fafc; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 0.85rem; color: var(--dark);">
+name: CI/CD Pipeline
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+  
+  build-docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build Docker image
+        run: docker build -t myapp:${{ github.sha }} .
+      - name: Push to Registry
+        run: docker push myapp:${{ github.sha }}
+  
+  deploy:
+    needs: build-docker
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy to production
+        run: ./deploy.sh ${{ github.sha }}</pre>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h3 style="color: var(--primary); margin-bottom: 20px;">
+                            <i class="fas fa-chart-pie"></i> Statut Actuel
+                        </h3>
+                        
+                        <div style="background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; border: 1px solid rgba(0,0,0,0.05);">
+                            <h4 style="color: var(--dark); margin-bottom: 15px;">Environnements</h4>
+                            <div style="display: flex; flex-direction: column; gap: 15px;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div style="width: 12px; height: 12px; border-radius: 50%; background: #10b981;"></div>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600;">Développement</div>
+                                        <div style="font-size: 0.85rem; color: var(--gray);">Version: v1.2.3-dev</div>
+                                    </div>
+                                    <span style="font-size: 0.85rem; color: var(--secondary);">Actif</span>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div style="width: 12px; height: 12px; border-radius: 50%; background: #3b82f6;"></div>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600;">Staging</div>
+                                        <div style="font-size: 0.85rem; color: var(--gray);">Version: v1.2.2</div>
+                                    </div>
+                                    <span style="font-size: 0.85rem; color: var(--primary);">Stable</span>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div style="width: 12px; height: 12px; border-radius: 50%; background: #8b5cf6;"></div>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600;">Production</div>
+                                        <div style="font-size: 0.85rem; color: var(--gray);">Version: v1.2.1</div>
+                                    </div>
+                                    <span style="font-size: 0.85rem; color: var(--accent);">Live</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="background: white; border-radius: 10px; padding: 20px; border: 1px solid rgba(0,0,0,0.05);">
+                            <h4 style="color: var(--dark); margin-bottom: 15px;">Prochaine Exécution</h4>
+                            <div id="next-execution" style="text-align: center; padding: 20px;">
+                                <div style="font-size: 2rem; color: var(--primary); margin-bottom: 10px;">
+                                    <i class="fas fa-clock"></i>
+                                </div>
+                                <div style="font-size: 0.9rem; color: var(--gray);">
+                                    Attente d'un nouveau commit
+                                </div>
+                                <div id="countdown" style="font-size: 1.5rem; font-weight: 700; color: var(--dark); margin: 15px 0;">
+                                    --
+                                </div>
+                                <button id="simulate-commit" class="btn" style="padding: 8px 20px; font-size: 0.9rem; width: 100%;">
+                                    <i class="fas fa-code-commit"></i> Simuler un Commit
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section id="contact" class="contact-section">
+        <div class="container">
+            <h2>Contact & Contributions</h2>
+            <p class="section-subtitle">
+                Vous souhaitez en savoir plus, contribuer ou discuter DevOps ? Contactez-nous !
+            </p>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 50px; align-items: start;">
+                <div class="fade-in">
+                    <h3 style="color: var(--primary); margin-bottom: 20px;">
+                        <i class="fas fa-envelope-open-text"></i> Nous Contacter
+                    </h3>
+                    
+                    <div style="background: white; border-radius: 15px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.05);">
+                        <form id="contact-form">
+                            <div style="margin-bottom: 20px;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--dark);">
+                                    <i class="fas fa-user"></i> Nom
+                                </label>
+                                <input type="text" id="contact-name" style="width: 100%; padding: 12px; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; font-size: 1rem;" placeholder="Votre nom" required>
+                            </div>
+                            
+                            <div style="margin-bottom: 20px;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--dark);">
+                                    <i class="fas fa-envelope"></i> Email
+                                </label>
+                                <input type="email" id="contact-email" style="width: 100%; padding: 12px; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; font-size: 1rem;" placeholder="votre@email.com" required>
+                            </div>
+                            
+                            <div style="margin-bottom: 20px;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--dark);">
+                                    <i class="fas fa-edit"></i> Message
+                                </label>
+                                <textarea rows="5" id="contact-message" style="width: 100%; padding: 12px; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; font-size: 1rem; resize: vertical;" placeholder="Votre message concernant le projet CI/CD..." required></textarea>
+                            </div>
+                            
+                            <button type="submit" class="btn" style="width: 100%;">
+                                <i class="fas fa-paper-plane"></i> Envoyer le Message
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                
+                <div class="fade-in">
+                    <h3 style="color: var(--primary); margin-bottom: 20px;">
+                        <i class="fas fa-code-branch"></i> Contribuer au Projet
+                    </h3>
+                    
+                    <div style="background: white; border-radius: 15px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.05);">
+                        <p style="margin-bottom: 20px;">Ce projet est open source ! Vous pouvez contribuer de plusieurs manières :</p>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 15px;">
+                            <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: #f8fafc; border-radius: 10px;">
+                                <div style="width: 50px; height: 50px; background: rgba(37, 99, 235, 0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--primary);">
+                                    <i class="fab fa-github"></i>
+                                </div>
+                                <div>
+                                    <div style="font-weight: 600;">Fork sur GitHub</div>
+                                    <div style="font-size: 0.9rem; color: var(--gray);">Copiez le dépôt et proposez vos modifications</div>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: #f8fafc; border-radius: 10px;">
+                                <div style="width: 50px; height: 50px; background: rgba(16, 185, 129, 0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--secondary);">
+                                    <i class="fas fa-bug"></i>
+                                </div>
+                                <div>
+                                    <div style="font-weight: 600;">Signaler un bug</div>
+                                    <div style="font-size: 0.9rem; color: var(--gray);">Ouvrez une issue sur GitHub</div>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: #f8fafc; border-radius: 10px;">
+                                <div style="width: 50px; height: 50px; background: rgba(139, 92, 246, 0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--accent);">
+                                    <i class="fas fa-lightbulb"></i>
+                                </div>
+                                <div>
+                                    <div style="font-weight: 600;">Proposer une amélioration</div>
+                                    <div style="font-size: 0.9rem; color: var(--gray);">Suggérez de nouvelles fonctionnalités</div>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: #f8fafc; border-radius: 10px;">
+                                <div style="width: 50px; height: 50px; background: rgba(239, 68, 68, 0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #ef4444;">
+                                    <i class="fas fa-book"></i>
+                                </div>
+                                <div>
+                                    <div style="font-weight: 600;">Améliorer la documentation</div>
+                                    <div style="font-size: 0.9rem; color: var(--gray);">Aidez à documenter le projet</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 25px; text-align: center;">
+                            <a href="https://github.com/Thaumy/Atelier" target="_blank" class="btn" style="width: 100%;">
+                                <i class="fab fa-github"></i> Visiter le Dépôt GitHub
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h3><i class="fas fa-code-branch"></i> DevOps Pipeline</h3>
+                    <p>Projet d'implémentation d'un pipeline CI/CD complet avec GitHub Actions, Docker et déploiement automatique.</p>
+                    
+                    <div class="personal-info">
+                        <div class="info-item">
+                            <i class="fas fa-user"></i>
+                            <span>Responsable: <strong>Thaumy</strong></span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-map-marker-alt"></i>
+                            <span>Projet: <strong>Atelier CI/CD</strong></span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-calendar"></i>
+                            <span>Début: <strong>Janvier 2024</strong></span>
+                        </div>
+                        <div class="info-item">
+                            <i class="fas fa-code"></i>
+                            <span>Version: <strong>v2.1.0</strong></span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="footer-section">
+                    <h3><i class="fas fa-link"></i> Liens Rapides</h3>
+                    <ul class="footer-links">
+                        <li><a href="#home"><i class="fas fa-chevron-right"></i> Accueil</a></li>
+                        <li><a href="#project"><i class="fas fa-chevron-right"></i> Projet</a></li>
+                        <li><a href="#timeline"><i class="fas fa-chevron-right"></i> Chronologie</a></li>
+                        <li><a href="#team"><i class="fas fa-chevron-right"></i> Équipe</a></li>
+                        <li><a href="#demo"><i class="fas fa-chevron-right"></i> Démo</a></li>
+                        <li><a href="#contact"><i class="fas fa-chevron-right"></i> Contact</a></li>
+                    </ul>
+                </div>
+                
+                <div class="footer-section">
+                    <h3><i class="fas fa-tools"></i> Technologies</h3>
+                    <ul class="footer-links">
+                        <li><a href="#"><i class="fab fa-github"></i> GitHub Actions</a></li>
+                        <li><a href="#"><i class="fab fa-docker"></i> Docker</a></li>
+                        <li><a href="#"><i class="fab fa-js"></i> JavaScript/Node.js</a></li>
+                        <li><a href="#"><i class="fas fa-server"></i> Nginx</a></li>
+                        <li><a href="#"><i class="fas fa-shield-alt"></i> SSH & Sécurité</a></li>
+                        <li><a href="#"><i class="fas fa-chart-bar"></i> Monitoring</a></li>
+                    </ul>
+                </div>
+                
+                <div class="footer-section">
+                    <h3><i class="fas fa-share-alt"></i> Connectez-vous</h3>
+                    <p>Suivez le projet et contactez l'équipe :</p>
+                    
+                    <div class="social-links">
+                        <a href="https://github.com/Thaumy/Atelier" target="_blank" class="social-link">
+                            <i class="fab fa-github"></i>
+                        </a>
+                        <a href="#" class="social-link">
+                            <i class="fab fa-twitter"></i>
+                        </a>
+                        <a href="#" class="social-link">
+                            <i class="fab fa-linkedin-in"></i>
+                        </a>
+                        <a href="#" class="social-link">
+                            <i class="fab fa-dev"></i>
+                        </a>
+                        <a href="#" class="social-link">
+                            <i class="fas fa-envelope"></i>
+                        </a>
+                    </div>
+                    
+                    <div class="build-info">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>Build #: <strong id="build-number">47</strong></span>
+                            <span style="color: #10b981;">✓ Réussi</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>Dernière mise à jour:</span>
+                            <span id="footer-last-update">Aujourd'hui, 14:30</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Environnement:</span>
+                            <span style="color: #8b5cf6;">Production</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="copyright">
+                <p>© 2024 DevOps Pipeline Project. Tous droits réservés. | Dernier déploiement: <span id="footer-deploy-time">Aujourd'hui, 14:30</span></p>
+                <p style="margin-top: 10px; font-size: 0.8rem; color: #9ca3af;">
+                    <i class="fas fa-code"></i> Développé avec passion par l'équipe DevOps | 
+                    <i class="fas fa-heart" style="color: #ef4444;"></i> Open Source
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts JavaScript -->
+    <script src="/js/app.js"></script>
+    <script src="/js/pipeline-simulator.js"></script>
+    <script src="/js/metrics-updater.js"></script>
+</body>
+</html>

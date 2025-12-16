@@ -1,0 +1,63 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main,dev]
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Create public/ if missing
+      run: |
+        echo "🔍 Checking public/ directory..."
+        if [ ! -d "public" ]; then
+          echo "📁 Creating public/ directory..."
+          mkdir -p public
+          echo '<h1>DevOps Pipeline</h1>' > public/index.html
+          echo "✅ Created public/index.html"
+        fi
+        if [ ! -f "public/index.html" ]; then
+          echo "📄 Creating index.html..."
+          echo '<h1>DevOps Pipeline</h1><p>Commit: ${{ github.sha }}</p>' > public/index.html
+          echo "✅ Created index.html"
+        fi
+        echo "📊 Files in public/:"
+        find public -type f | sed 's/^/  📄 /' 2>/dev/null || echo "  (empty)"
+    
+    - name: Setup Pages
+      uses: actions/configure-pages@v4
+    
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: "public"
+    
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
+    
+    - name: Show deployment info
+      run: |
+        echo "🎉 DEPLOYMENT SUCCESSFUL!"
+        echo ""
+        echo "🌐 Site URL:"
+        echo "${{ steps.deployment.outputs.page_url }}"
+        echo ""
+        echo "📊 Details:"
+        echo "- Commit: ${{ github.sha }}"
+        echo "- Branch: ${{ github.ref_name }}"
+        echo "- Triggered by: ${{ github.actor }}"
+        echo "- Time: $(date)"
