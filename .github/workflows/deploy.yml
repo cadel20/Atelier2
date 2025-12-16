@@ -344,20 +344,52 @@ jobs:
         # Créer un répertoire temporaire pour le build
         mkdir -p _site_build
         
-        # Copier tout le contenu du dossier public
         echo "📋 Copie du dossier ${{ env.SOURCE_DIR }}..."
-        cp -r "${{ env.SOURCE_DIR }}"/* _site_build/ 2>/dev/null || true
+        
+        # Méthode 1: Copie récursive avec rsync (plus fiable)
+        if command -v rsync > /dev/null 2>&1; then
+          echo "  🔧 Utilisation de rsync pour la copie..."
+          rsync -av "${{ env.SOURCE_DIR }}/" _site_build/ --exclude=".*" 2>/dev/null || echo "⚠️  Rsync a rencontré des problèmes, tentative alternative..."
+        fi
+        
+        # Méthode 2: Copie avec find et cp (fallback)
+        if [ ! "$(ls -A _site_build 2>/dev/null)" ]; then
+          echo "  🔧 Utilisation de find/cp pour la copie..."
+          find "${{ env.SOURCE_DIR }}" -type f -exec cp --parents {} _site_build/ \; 2>/dev/null || true
+        fi
+        
+        # Méthode 3: Copie simple (dernier recours)
+        if [ ! "$(ls -A _site_build 2>/dev/null)" ]; then
+          echo "  🔧 Copie simple..."
+          cp -r "${{ env.SOURCE_DIR }}"/* _site_build/ 2>/dev/null || true
+        fi
         
         # Vérifier ce qui a été copié
         echo ""
         echo "📁 Structure du build:"
-        find _site_build -type f | head -30 | sed 's/^/  📄 /'
-        
-        TOTAL_FILES=$(find _site_build -type f | wc -l)
-        echo "Total fichiers dans le build: $TOTAL_FILES"
-        
-        if [ $TOTAL_FILES -eq 0 ]; then
-          echo "❌ ERREUR: Aucun fichier copié - dossier source vide?"
+        if [ "$(ls -A _site_build 2>/dev/null)" ]; then
+          find _site_build -type f | head -30 | sed 's/^/  📄 /'
+          
+          TOTAL_FILES=$(find _site_build -type f | wc -l)
+          echo "Total fichiers dans le build: $TOTAL_FILES"
+          
+          # Vérifier que index.html a été copié
+          if [ ! -f "_site_build/index.html" ]; then
+            echo "❌ ERREUR CRITIQUE: index.html non copié dans le build"
+            echo "Tentative de copie manuelle..."
+            cp "${{ env.SOURCE_DIR }}/index.html" _site_build/
+            
+            if [ ! -f "_site_build/index.html" ]; then
+              echo "❌ Impossible de copier index.html - déploiement impossible"
+              exit 1
+            else
+              echo "✅ index.html copié manuellement"
+            fi
+          fi
+        else
+          echo "❌ ERREUR CRITIQUE: Aucun fichier copié - dossier source vide ou problème de permissions"
+          echo "Contenu du dossier source:"
+          ls -la "${{ env.SOURCE_DIR }}"/
           exit 1
         fi
         
@@ -424,7 +456,7 @@ jobs:
         EOF
         
         echo ""
-        echo "📊 Taille du build: $(du -sh _site_build | cut -f1)"
+        echo "📊 Taille du build: $(du -sh _site_build 2>/dev/null || echo "inconnue")"
         echo "✅ Préparation terminée"
 
     - name: Upload to GitHub Pages

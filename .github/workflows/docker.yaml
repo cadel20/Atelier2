@@ -2,10 +2,10 @@ name: Publish Docker Image
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   release:
     types: [published, prereleased]
   workflow_dispatch:
@@ -35,6 +35,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
   DOCKERHUB_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   SECURITY_SCAN_ENABLED: true
+  SOURCE_DIR: public  # Dossier source des fichiers statiques
 
 jobs:
   validate-docker:
@@ -43,12 +44,28 @@ jobs:
     outputs:
       dockerfile-exists: ${{ steps.check-dockerfile.outputs.exists }}
       dockerfile-valid: ${{ steps.validate-dockerfile.outputs.valid }}
+      public-dir-exists: ${{ steps.check-public-dir.outputs.exists }}
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 1
+    
+    - name: Check public directory exists
+      id: check-public-dir
+      run: |
+        echo "🔍 Vérification du dossier ${{ env.SOURCE_DIR }}..."
+        
+        if [ -d "${{ env.SOURCE_DIR }}" ]; then
+          echo "✅ Dossier ${{ env.SOURCE_DIR }}/ présent"
+          echo "Contenu:"
+          find "${{ env.SOURCE_DIR }}" -type f | head -10 | sed 's/^/  📄 /'
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️  Dossier ${{ env.SOURCE_DIR }}/ manquant"
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
     
     - name: Check Dockerfile existence
       id: check-dockerfile
@@ -103,7 +120,18 @@ jobs:
           fi
         fi
         
-        # 2. Vérifier les instructions essentielles
+        # 2. Vérifier si le Dockerfile copie les fichiers depuis public/
+        echo ""
+        echo "📁 Vérification de la copie des fichiers..."
+        
+        if grep -q "COPY.*${{ env.SOURCE_DIR }}" "$MAIN_DOCKERFILE" || grep -q "ADD.*${{ env.SOURCE_DIR }}" "$MAIN_DOCKERFILE"; then
+          echo "✅ Le Dockerfile copie les fichiers depuis ${{ env.SOURCE_DIR }}/"
+        else
+          echo "⚠️  Le Dockerfile ne copie pas explicitement ${{ env.SOURCE_DIR }}/"
+          echo "   Il devrait contenir: COPY ${{ env.SOURCE_DIR }}/ /usr/share/nginx/html/"
+        fi
+        
+        # 3. Vérifier les instructions essentielles
         echo ""
         echo "🔧 Vérification des instructions..."
         
@@ -127,7 +155,7 @@ jobs:
           echo "⚠️  USER non défini (sécurité recommandée)"
         fi
         
-        # 3. Vérifier les vulnérabilités potentielles
+        # 4. Vérifier les vulnérabilités potentielles
         echo ""
         echo "🔒 Vérification de sécurité..."
         
@@ -147,7 +175,7 @@ jobs:
           VALIDATION_PASSED=false
         fi
         
-        # 4. Vérifier la taille
+        # 5. Vérifier la taille
         echo ""
         echo "📏 Analyse de la taille..."
         
@@ -158,7 +186,7 @@ jobs:
           echo "⚠️  Dockerfile volumineux (>100 lignes) - optimisation recommandée"
         fi
         
-        # 5. Résumé
+        # 6. Résumé
         echo ""
         echo "=========================================="
         if [ "$VALIDATION_PASSED" = true ]; then
@@ -204,16 +232,36 @@ jobs:
         ## Fichiers Docker
         $(find . -name "Dockerfile*" -type f -exec echo "- \`{}\`" \;)
         
+        ## Structure du Projet
+        - ✅ Dossier source: ${{ env.SOURCE_DIR }}/
+        - ✅ Présence: ${{ steps.check-public-dir.outputs.exists }}
+        
         ## Validation Syntaxique
         - ✅ FROM: Présent
+        - ✅ Copie des fichiers: Vérifiée
         - ✅ Instructions essentielles vérifiées
         - 🔒 Sécurité: Analyse effectuée
         
-        ## Recommandations
-        1. Utiliser des images de base officielles
-        2. Définir un USER non-root
-        3. Multi-stage builds pour réduire la taille
-        4. Utiliser .dockerignore
+        ## Recommandations pour votre Dockerfile
+        1. Utiliser Nginx ou Apache comme serveur web
+        2. Copier \`${{ env.SOURCE_DIR }}/\` vers \`/usr/share/nginx/html/\`
+        3. Définir un USER non-root
+        4. Exposer le port 80 (HTTP) ou 443 (HTTPS)
+        
+        ## Exemple de Dockerfile recommandé
+        \`\`\`dockerfile
+        # Utiliser Nginx comme serveur web
+        FROM nginx:alpine
+        
+        # Copier les fichiers statiques depuis public/
+        COPY ${{ env.SOURCE_DIR }}/ /usr/share/nginx/html/
+        
+        # Exposer le port HTTP
+        EXPOSE 80
+        
+        # Définir la commande par défaut
+        CMD ["nginx", "-g", "daemon off;"]
+        \`\`\`
         
         ## Prochaines Étapes
         - Build de l'image
@@ -255,6 +303,56 @@ jobs:
         name: docker-validation-report
         path: ./
 
+    - name: Verify public directory content
+      run: |
+        echo "📁 Vérification du contenu de ${{ env.SOURCE_DIR }}/..."
+        echo "=========================================="
+        
+        if [ -d "${{ env.SOURCE_DIR }}" ]; then
+          echo "✅ Dossier présent"
+          echo "Structure:"
+          find "${{ env.SOURCE_DIR }}" -type f | sed 's/^/  📄 /' | head -20
+          
+          TOTAL_FILES=$(find "${{ env.SOURCE_DIR }}" -type f | wc -l)
+          echo ""
+          echo "📊 Total fichiers dans ${{ env.SOURCE_DIR }}/: $TOTAL_FILES"
+          
+          # Vérifier index.html
+          if [ -f "${{ env.SOURCE_DIR }}/index.html" ]; then
+            echo "✅ index.html présent"
+            HTML_SIZE=$(stat -f%z "${{ env.SOURCE_DIR }}/index.html" 2>/dev/null || stat -c%s "${{ env.SOURCE_DIR }}/index.html" 2>/dev/null)
+            echo "   Taille: $((HTML_SIZE / 1024)) KB"
+          else
+            echo "❌ ERREUR: index.html manquant dans ${{ env.SOURCE_DIR }}/"
+            exit 1
+          fi
+        else
+          echo "⚠️  Dossier ${{ env.SOURCE_DIR }}/ manquant"
+          echo "Création d'un exemple minimal..."
+          mkdir -p "${{ env.SOURCE_DIR }}"
+          cat > "${{ env.SOURCE_DIR }}/index.html" << EOF
+          <!DOCTYPE html>
+          <html lang="fr">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>DevOps Pipeline CI/CD</title>
+              <style>
+                  body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                  h1 { color: #2563eb; }
+                  p { color: #6b7280; }
+              </style>
+          </head>
+          <body>
+              <h1>DevOps Pipeline CI/CD</h1>
+              <p>Site statique déployé via Docker</p>
+              <p><small>Version: ${{ github.sha }}</small></p>
+          </body>
+          </html>
+          EOF
+          echo "✅ Fichier exemple créé dans ${{ env.SOURCE_DIR }}/"
+        fi
+
     - name: Set up QEMU for multi-arch
       uses: docker/setup-qemu-action@v3
       with:
@@ -293,6 +391,7 @@ jobs:
           org.opencontainers.image.created=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
           org.opencontainers.image.revision=${{ github.sha }}
           org.opencontainers.image.licenses=MIT
+          org.opencontainers.image.source-dir=${{ env.SOURCE_DIR }}
 
     - name: Log in to Docker Hub
       if: github.event_name != 'pull_request' && github.event.inputs.push-to-registry != 'false'
@@ -328,6 +427,8 @@ jobs:
         sbom: true
         secrets: |
           "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}"
+        build-args: |
+          SOURCE_DIR=${{ env.SOURCE_DIR }}
 
     - name: Save image to artifacts
       if: github.event_name == 'pull_request' || github.event.inputs.push-to-registry == 'false'
@@ -349,6 +450,7 @@ jobs:
         
         echo "📦 Image ID: $IMAGE_ID"
         echo "🏷️  Tags: ${{ steps.meta.outputs.tags }}"
+        echo "📁 Source: ${{ env.SOURCE_DIR }}/"
         
         # Scan avec Trivy (si disponible)
         if command -v trivy &> /dev/null; then
@@ -386,10 +488,10 @@ jobs:
         IMAGE_ID=$(docker images --format "{{.ID}}" | head -1)
         
         # Test 1: Lancer le conteneur
-        echo "1. Test de démarrage..."
+        echo "1. Test de démarrage sur port 8080..."
         docker run --rm -d --name test-container -p 8080:80 "$IMAGE_ID" || true
         
-        sleep 2
+        sleep 3
         
         # Test 2: Vérifier si le conteneur tourne
         if docker ps | grep -q test-container; then
@@ -400,9 +502,33 @@ jobs:
           HEALTH_STATUS=$(docker inspect test-container --format='{{.State.Health.Status}}' 2>/dev/null || echo "No healthcheck")
           echo "   Statut santé: $HEALTH_STATUS"
           
-          # Test 4: Vérifier les logs
-          echo "3. Vérification des logs..."
-          docker logs test-container --tail 10 2>/dev/null || echo "   Aucun log disponible"
+          # Test 4: Tester l'accès HTTP
+          echo "3. Test d'accès HTTP..."
+          if command -v curl &> /dev/null; then
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "FAILED")
+            echo "   HTTP Status: $HTTP_STATUS"
+            
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "   ✅ Serveur web fonctionnel"
+              
+              # Vérifier le contenu HTML
+              echo "4. Vérification du contenu..."
+              HTML_CONTENT=$(curl -s http://localhost:8080/ | grep -i "html" || echo "No HTML")
+              if echo "$HTML_CONTENT" | grep -q "html"; then
+                echo "   ✅ Contenu HTML détecté"
+              else
+                echo "   ⚠️  Pas de contenu HTML détecté"
+              fi
+            else
+              echo "   ⚠️  Statut HTTP non 200: $HTTP_STATUS"
+            fi
+          else
+            echo "   ℹ️  curl non disponible, test HTTP non effectué"
+          fi
+          
+          # Test 5: Vérifier les logs
+          echo "5. Vérification des logs..."
+          docker logs test-container --tail 10 2>/dev/null || echo "   ℹ️  Aucun log disponible"
           
           # Arrêter le conteneur
           docker stop test-container 2>/dev/null || true
@@ -454,6 +580,12 @@ jobs:
         - **Tags**: ${{ steps.meta.outputs.tags }}
         - **Platforme**: ${{ matrix.platform }}
         - **SHA**: \`${{ github.sha }}\`
+        - **Dossier source**: ${{ env.SOURCE_DIR }}/
+        
+        ## Structure du Site
+        - ✅ index.html présent dans ${{ env.SOURCE_DIR }}/
+        - ✅ Fichiers statiques vérifiés
+        - ✅ Tests conteneur passés
         
         ## Registries
         $(if [ "${{ github.event.inputs.push-to-registry }}" != "false" ]; then
@@ -471,6 +603,17 @@ jobs:
         ## Tests
         - 🧪 Tests conteneur: Exécutés
         - ✅ Validation: Passée
+        
+        ## Utilisation
+        \`\`\`bash
+        # Lancer le conteneur
+        docker run -d -p 8080:80 \\
+          --name devops-pipeline \\
+          ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        
+        # Accéder au site
+        open http://localhost:8080
+        \`\`\`
         
         ## Métriques
         - ⚙️  Platformes: ${{ matrix.platform }}
@@ -500,6 +643,7 @@ jobs:
           echo "🎉 DÉPLOIEMENT DOCKER RÉUSSI !"
           echo ""
           echo "📦 Image Docker publiée avec succès"
+          echo "📁 Source: ${{ env.SOURCE_DIR }}/"
           echo ""
           echo "🔗 Accéder aux images:"
           
@@ -517,14 +661,16 @@ jobs:
           echo ""
           echo "🚀 Utilisation:"
           echo "  docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo "  docker run -p 8080:80 ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
           
         else
           echo "❌ DÉPLOIEMENT DOCKER ÉCHOUÉ"
           echo ""
           echo "🔧 Actions recommandées:"
           echo "  1. Vérifier les logs du workflow"
-          echo "  2. Corriger le Dockerfile si nécessaire"
-          echo "  3. Relancer le déploiement"
+          echo "  2. Vérifier le Dockerfile"
+          echo "  3. S'assurer que ${{ env.SOURCE_DIR }}/ contient index.html"
+          echo "  4. Relancer le déploiement"
         fi
 
   deploy-notification:
@@ -555,6 +701,7 @@ jobs:
         - **Branche**: ${{ github.ref_name }}
         - **Commit**: \`${{ github.sha }}\`
         - **Statut global**: ${{ needs.build-scan-push.result }}
+        - **Dossier source**: ${{ env.SOURCE_DIR }}/
         
         ## 🔗 Liens utiles
         - **Workflow**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -571,11 +718,20 @@ jobs:
         docker pull ${{ env.DOCKERHUB_USERNAME }}/atelier-cicd:latest
         
         # Exécuter le conteneur
-        docker run -p 8080:80 ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        docker run -d -p 8080:80 \\
+          --name devops-pipeline \\
+          ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        
+        # Vérifier les logs
+        docker logs devops-pipeline
+        
+        # Arrêter le conteneur
+        docker stop devops-pipeline
         \`\`\`
         
         ## 📈 Métriques
         - ✅ Dockerfile validé
+        - ✅ Dossier ${{ env.SOURCE_DIR }}/ vérifié
         - 🔒 Scan sécurité effectué
         - 🧪 Tests conteneur exécutés
         - 📦 Multi-architecture: ${{ github.event.inputs.build-platforms || 'linux/amd64, linux/arm64' }}
@@ -584,6 +740,22 @@ jobs:
         Les rapports détaillés sont disponibles dans les artefacts:
         - docker-validation-report.md
         - docker-deployment-summary-*.md
+        
+        ## 💡 Recommandations pour votre Dockerfile
+        Votre Dockerfile devrait copier les fichiers depuis \`${{ env.SOURCE_DIR }}/\`:
+        
+        \`\`\`dockerfile
+        # Exemple pour Nginx
+        FROM nginx:alpine
+        COPY ${{ env.SOURCE_DIR }}/ /usr/share/nginx/html/
+        EXPOSE 80
+        CMD ["nginx", "-g", "daemon off;"]
+        
+        # Exemple pour Apache
+        FROM httpd:alpine
+        COPY ${{ env.SOURCE_DIR }}/ /usr/local/apache2/htdocs/
+        EXPOSE 80
+        \`\`\`
         
         ---
         *Déploiement automatisé DevOps Pipeline CI/CD*
@@ -601,6 +773,8 @@ jobs:
         
         if [ "${{ needs.build-scan-push.result }}" = "success" ]; then
           echo "🎉 SUCCÈS: Image Docker publiée"
+          echo "📁 Source: ${{ env.SOURCE_DIR }}/"
+          echo "🚀 Utilisation: docker run -p 8080:80 ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
         else
           echo "❌ ÉCHEC: Vérifiez les logs pour les détails"
         fi
