@@ -8,10 +8,6 @@ on:
 permissions:
   pages: write
   id-token: write
-  contents: read
-
-env:
-  SOURCE_DIR: public  # Dossier source pour le déploiement
 
 jobs:
   deploy:
@@ -21,19 +17,18 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
-    - name: Checkout code
+    - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Vérifier le dossier source
+    - name: Vérifier dossier public
       run: |
-        echo "🔍 Vérification du dossier ${{ env.SOURCE_DIR }}/..."
+        echo "🔍 Vérification du dossier public/..."
         
-        if [ ! -d "${{ env.SOURCE_DIR }}" ]; then
-          echo "⚠️  Dossier '${{ env.SOURCE_DIR }}/' manquant - création d'un exemple"
-          mkdir -p "${{ env.SOURCE_DIR }}"
+        if [ ! -d "public" ]; then
+          echo "⚠️  Dossier 'public/' manquant - création d'un exemple"
+          mkdir -p "public"
           
-          # Créer un index.html minimal
-          cat > "${{ env.SOURCE_DIR }}/index.html" << EOF
+          cat > public/index.html << 'EOF'
           <!DOCTYPE html>
           <html lang="fr">
           <head>
@@ -54,14 +49,13 @@ jobs:
           </html>
           EOF
           
-          echo "✅ Exemple créé dans ${{ env.SOURCE_DIR }}/index.html"
+          echo "✅ Exemple créé dans public/index.html"
         else
-          echo "✅ Dossier '${{ env.SOURCE_DIR }}/' présent"
+          echo "✅ Dossier 'public/' présent"
           
-          # Vérifier index.html
-          if [ ! -f "${{ env.SOURCE_DIR }}/index.html" ]; then
+          if [ ! -f "public/index.html" ]; then
             echo "⚠️  index.html manquant - création d'un exemple"
-            cat > "${{ env.SOURCE_DIR }}/index.html" << EOF
+            cat > public/index.html << 'EOF'
             <!DOCTYPE html>
             <html lang="fr">
             <head>
@@ -80,35 +74,27 @@ jobs:
         fi
         
         echo ""
-        echo "📁 Contenu de ${{ env.SOURCE_DIR }}/ :"
-        find "${{ env.SOURCE_DIR }}" -type f | head -10 | sed 's/^/  📄 /'
+        echo "📁 Contenu de public/ :"
+        find public -type f | head -10 | sed 's/^/  📄 /'
     
-    - name: Setup GitHub Pages
+    - name: Setup Pages
       uses: actions/configure-pages@v4
     
-    - name: Upload to GitHub Pages
+    - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
       with:
-        path: "${{ env.SOURCE_DIR }}"  # ✅ Upload du dossier public/
+        path: "public"
     
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: Show deployment info
+    - name: Résultat
       run: |
         echo "✅ DÉPLOIEMENT RÉUSSI !"
         echo ""
-        echo "🌐 URL du site:"
-        echo "${{ steps.deployment.outputs.page_url }}"
-        echo ""
+        echo "🌐 URL: ${{ steps.deployment.outputs.page_url }}"
         echo "📊 Détails:"
         echo "- Commit: ${{ github.sha }}"
         echo "- Branche: ${{ github.ref_name }}"
         echo "- Déclenché par: ${{ github.actor }}"
-        echo "- Dossier source: ${{ env.SOURCE_DIR }}/"
-        echo ""
-        echo "🔗 Accéder au site:"
-        echo "${{ steps.deployment.outputs.page_url }}"
