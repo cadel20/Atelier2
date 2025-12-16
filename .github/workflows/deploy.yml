@@ -30,6 +30,7 @@ permissions:
 env:
   NODE_ENV: production
   DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'production' }}
+  SOURCE_DIR: public  # Dossier source pour le déploiement
 
 jobs:
   validate-deployment:
@@ -44,21 +45,30 @@ jobs:
         fetch-depth: 0
         fetch-tags: true
     
-    - name: Validate deployment files
+    - name: Validate public directory
       run: |
-        echo "🔍 Validation des fichiers de déploiement..."
+        echo "🔍 Validation du dossier public..."
         echo "=========================================="
         
-        # Fichiers obligatoires
+        # Vérifier l'existence du dossier public
+        if [ ! -d "${{ env.SOURCE_DIR }}" ]; then
+          echo "❌ ERREUR: Dossier '${{ env.SOURCE_DIR }}' manquant"
+          echo "Votre structure de projet doit inclure un dossier '${{ env.SOURCE_DIR }}/' contenant index.html"
+          exit 1
+        fi
+        
+        echo "✅ Dossier '${{ env.SOURCE_DIR }}/' présent"
+        
+        # Vérifier les fichiers obligatoires dans public/
         REQUIRED_FILES=("index.html")
         missing_files=0
         
         for file in "${REQUIRED_FILES[@]}"; do
-          if [ ! -f "$file" ]; then
-            echo "❌ ERREUR: $file manquant - requis pour le déploiement"
+          if [ ! -f "${{ env.SOURCE_DIR }}/$file" ]; then
+            echo "❌ ERREUR: $file manquant dans ${{ env.SOURCE_DIR }}/ - requis pour le déploiement"
             missing_files=$((missing_files + 1))
           else
-            echo "✅ $file présent"
+            echo "✅ ${{ env.SOURCE_DIR }}/$file présent"
           fi
         done
         
@@ -68,13 +78,33 @@ jobs:
           exit 1
         fi
         
-        # Vérifier la taille totale
+        # Vérifier la structure du dossier public
         echo ""
+        echo "📁 Structure du dossier ${{ env.SOURCE_DIR }}:"
+        find "${{ env.SOURCE_DIR }}" -type f | head -20 | sed 's/^/  📄 /'
+        
+        TOTAL_FILES=$(find "${{ env.SOURCE_DIR }}" -type f | wc -l)
+        echo "Total fichiers: $TOTAL_FILES"
+        
+        if [ $TOTAL_FILES -eq 0 ]; then
+          echo "⚠️  ATTENTION: Dossier ${{ env.SOURCE_DIR }} vide"
+        fi
+
+    - name: Validate deployment files
+      run: |
+        echo "🔍 Validation des fichiers de déploiement..."
+        echo "=========================================="
+        
+        # Vérifier la taille totale
         echo "📏 Analyse de la taille du projet..."
-        TOTAL_SIZE=$(find . -type f -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" | xargs stat -f%z 2>/dev/null | awk '{sum+=$1} END {print sum}')
+        TOTAL_SIZE=$(find "${{ env.SOURCE_DIR }}" -type f -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" 2>/dev/null | xargs stat -f%z 2>/dev/null | awk '{sum+=$1} END {print sum}')
         
         if [ -z "$TOTAL_SIZE" ]; then
-          TOTAL_SIZE=$(find . -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) -exec stat -c%s {} + | awk '{sum+=$1} END {print sum}')
+          TOTAL_SIZE=$(find "${{ env.SOURCE_DIR }}" -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" \) -exec stat -c%s {} + 2>/dev/null | awk '{sum+=$1} END {print sum}')
+        fi
+        
+        if [ -z "$TOTAL_SIZE" ]; then
+          TOTAL_SIZE=0
         fi
         
         echo "Taille totale des assets: $((TOTAL_SIZE / 1024)) KB"
@@ -86,7 +116,7 @@ jobs:
         # Vérifier les liens externes
         echo ""
         echo "🔗 Vérification des liens externes..."
-        if grep -r "http://" --include="*.html" --include="*.css" --include="*.js" . | grep -v "http://localhost" | grep -v "http://127.0.0.1"; then
+        if grep -r "http://" --include="*.html" --include="*.css" --include="*.js" "${{ env.SOURCE_DIR }}" 2>/dev/null | grep -v "http://localhost" | grep -v "http://127.0.0.1"; then
           echo "⚠️  ATTENTION: Liens HTTP non sécurisés détectés"
         else
           echo "✅ Tous les liens externes utilisent HTTPS ou sont locaux"
@@ -95,18 +125,19 @@ jobs:
         # Vérifier les erreurs 404 potentielles
         echo ""
         echo "🔍 Vérification des fichiers référencés..."
-        HTML_FILES=$(find . -name "*.html" -type f)
+        HTML_FILES=$(find "${{ env.SOURCE_DIR }}" -name "*.html" -type f 2>/dev/null)
         
         for html_file in $HTML_FILES; do
           echo "Analyse de $html_file..."
           
           # Extraire les liens vers les assets locaux
-          ASSETS=$(grep -o 'src="[^"]*"' "$html_file" | cut -d'"' -f2 | grep -v "^http" | grep -v "^//")
-          ASSETS="$ASSETS $(grep -o 'href="[^"]*"' "$html_file" | cut -d'"' -f2 | grep -v "^http" | grep -v "^//" | grep -v "^mailto:" | grep -v "^tel:")"
-          ASSETS="$ASSETS $(grep -o 'url([^)]*)' "$html_file" | sed "s/url('//;s/')//;s/url(\"//;s/\")//" | grep -v "^http" | grep -v "^//")"
+          ASSETS=$(grep -o 'src="[^"]*"' "$html_file" 2>/dev/null | cut -d'"' -f2 | grep -v "^http" | grep -v "^//")
+          ASSETS="$ASSETS $(grep -o 'href="[^"]*"' "$html_file" 2>/dev/null | cut -d'"' -f2 | grep -v "^http" | grep -v "^//" | grep -v "^mailto:" | grep -v "^tel:")"
+          ASSETS="$ASSETS $(grep -o 'url([^)]*)' "$html_file" 2>/dev/null | sed "s/url('//;s/')//;s/url(\"//;s/\")//" | grep -v "^http" | grep -v "^//")"
           
           for asset in $ASSETS; do
-            if [ ! -f "$asset" ] && [ ! -d "$asset" ]; then
+            # Les assets sont référencés depuis la racine du site, donc on les cherche dans public/
+            if [ ! -f "${{ env.SOURCE_DIR }}/$asset" ] && [ ! -d "${{ env.SOURCE_DIR }}/$asset" ]; then
               echo "⚠️  Asset manquant dans $html_file: $asset"
             fi
           done
@@ -120,21 +151,28 @@ jobs:
         echo "📋 Validation de la qualité HTML..."
         echo "=========================================="
         
+        MAIN_HTML="${{ env.SOURCE_DIR }}/index.html"
+        
+        if [ ! -f "$MAIN_HTML" ]; then
+          echo "❌ ERREUR: $MAIN_HTML manquant"
+          exit 1
+        fi
+        
         # Vérifier les balises meta essentielles
         echo "🔍 Balises meta SEO..."
-        if grep -q "<meta name=\"description\"" index.html; then
+        if grep -q "<meta name=\"description\"" "$MAIN_HTML"; then
           echo "✅ Meta description présente"
         else
           echo "⚠️  ATTENTION: Meta description manquante (impact SEO)"
         fi
         
-        if grep -q "<meta name=\"keywords\"" index.html; then
+        if grep -q "<meta name=\"keywords\"" "$MAIN_HTML"; then
           echo "✅ Meta keywords présente"
         else
           echo "ℹ️  Meta keywords optionnelle"
         fi
         
-        if grep -q "<meta property=\"og:" index.html; then
+        if grep -q "<meta property=\"og:" "$MAIN_HTML"; then
           echo "✅ Open Graph tags présentes"
         else
           echo "⚠️  ATTENTION: Open Graph tags manquantes (réseaux sociaux)"
@@ -143,7 +181,7 @@ jobs:
         # Vérifier le favicon
         echo ""
         echo "🎨 Favicon..."
-        if grep -q "rel=\"icon\"" index.html || grep -q "rel=\"shortcut icon\"" index.html; then
+        if grep -q "rel=\"icon\"" "$MAIN_HTML" || grep -q "rel=\"shortcut icon\"" "$MAIN_HTML"; then
           echo "✅ Favicon détecté"
         else
           echo "⚠️  ATTENTION: Favicon manquant"
@@ -152,9 +190,9 @@ jobs:
         # Vérifier les analytics/tracking (optionnel)
         echo ""
         echo "📊 Analytics..."
-        if grep -q "google-analytics\|gtag\|analytics" index.html; then
+        if grep -q "google-analytics\|gtag\|analytics" "$MAIN_HTML"; then
           echo "✅ Google Analytics/GTag détecté"
-        elif grep -q "matomo\|piwik" index.html; then
+        elif grep -q "matomo\|piwik" "$MAIN_HTML"; then
           echo "✅ Matomo/Piwik détecté"
         else
           echo "ℹ️  Aucun outil d'analytics détecté"
@@ -165,11 +203,13 @@ jobs:
         echo "⚡ Analyse des métriques de performance..."
         echo "=========================================="
         
+        MAIN_HTML="${{ env.SOURCE_DIR }}/index.html"
+        
         # Vérifier les ressources bloquantes
         echo "🔍 Scripts bloquants..."
-        SYNC_SCRIPTS=$(grep -c '<script src=' index.html)
-        ASYNC_SCRIPTS=$(grep -c 'async' index.html)
-        DEFER_SCRIPTS=$(grep -c 'defer' index.html)
+        SYNC_SCRIPTS=$(grep -c '<script src=' "$MAIN_HTML")
+        ASYNC_SCRIPTS=$(grep -c 'async' "$MAIN_HTML")
+        DEFER_SCRIPTS=$(grep -c 'defer' "$MAIN_HTML")
         
         echo "Scripts synchrones: $SYNC_SCRIPTS"
         echo "Scripts async: $ASYNC_SCRIPTS"
@@ -182,8 +222,8 @@ jobs:
         # Vérifier le CSS inline vs externe
         echo ""
         echo "🎨 CSS..."
-        STYLE_TAGS=$(grep -c '<style>' index.html)
-        LINK_CSS=$(grep -c 'rel="stylesheet"' index.html)
+        STYLE_TAGS=$(grep -c '<style>' "$MAIN_HTML")
+        LINK_CSS=$(grep -c 'rel="stylesheet"' "$MAIN_HTML")
         
         echo "Balises <style> inline: $STYLE_TAGS"
         echo "Feuilles de style externes: $LINK_CSS"
@@ -195,8 +235,8 @@ jobs:
         # Vérifier les images
         echo ""
         echo "🖼️ Images..."
-        IMG_TAGS=$(grep -c '<img' index.html)
-        IMG_WITH_ALT=$(grep -c 'alt="' index.html)
+        IMG_TAGS=$(grep -c '<img' "$MAIN_HTML")
+        IMG_WITH_ALT=$(grep -c 'alt="' "$MAIN_HTML")
         
         echo "Total images: $IMG_TAGS"
         echo "Images avec attribut alt: $IMG_WITH_ALT"
@@ -226,14 +266,16 @@ jobs:
         - **Message**: $COMMIT_MESSAGE
         - **Workflow**: ${{ github.workflow }}
         - **Run ID**: ${{ github.run_id }}
+        - **Dossier source**: ${{ env.SOURCE_DIR }}
         
         ## Métriques du Projet
-        $(echo "Fichiers HTML: $(find . -name "*.html" -type f | wc -l)")
-        $(echo "Fichiers CSS: $(find . -name "*.css" -type f | wc -l)")
-        $(echo "Fichiers JS: $(find . -name "*.js" -type f | wc -l)")
-        $(echo "Images: $(find . -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" -type f | wc -l)")
+        $(echo "Fichiers HTML: $(find "${{ env.SOURCE_DIR }}" -name "*.html" -type f 2>/dev/null | wc -l)")
+        $(echo "Fichiers CSS: $(find "${{ env.SOURCE_DIR }}" -name "*.css" -type f 2>/dev/null | wc -l)")
+        $(echo "Fichiers JS: $(find "${{ env.SOURCE_DIR }}" -name "*.js" -type f 2>/dev/null | wc -l)")
+        $(echo "Images: $(find "${{ env.SOURCE_DIR }}" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" -o -name "*.svg" -type f 2>/dev/null | wc -l)")
         
         ## Validation
+        - ✅ Dossier ${{ env.SOURCE_DIR }} validé
         - ✅ Structure HTML validée
         - ✅ Assets vérifiés
         - ✅ Performance analysée
@@ -290,33 +332,43 @@ jobs:
     - name: Prepare build directory
       run: |
         echo "📁 Préparation du dossier de build..."
+        echo "Source: ${{ env.SOURCE_DIR }}/"
+        echo "=========================================="
+        
+        # Vérifier que le dossier source existe
+        if [ ! -d "${{ env.SOURCE_DIR }}" ]; then
+          echo "❌ ERREUR: Dossier source '${{ env.SOURCE_DIR }}' manquant"
+          exit 1
+        fi
         
         # Créer un répertoire temporaire pour le build
         mkdir -p _site_build
         
-        # Copier tous les fichiers nécessaires
-        echo "📋 Liste des fichiers à déployer:"
-        find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.json" -o -name "*.txt" -o -name "*.xml" -o -name "*.md" \) | while read file; do
-          echo "  📄 $file"
-          cp "$file" _site_build/
-        done
+        # Copier tout le contenu du dossier public
+        echo "📋 Copie du dossier ${{ env.SOURCE_DIR }}..."
+        cp -r "${{ env.SOURCE_DIR }}"/* _site_build/ 2>/dev/null || true
         
-        # Copier les répertoires
-        for dir in css js images assets static; do
-          if [ -d "$dir" ]; then
-            echo "  📁 $dir/"
-            cp -r "$dir" _site_build/
-          fi
-        done
+        # Vérifier ce qui a été copié
+        echo ""
+        echo "📁 Structure du build:"
+        find _site_build -type f | head -30 | sed 's/^/  📄 /'
         
-        # Ajouter un fichier CNAME si présent
+        TOTAL_FILES=$(find _site_build -type f | wc -l)
+        echo "Total fichiers dans le build: $TOTAL_FILES"
+        
+        if [ $TOTAL_FILES -eq 0 ]; then
+          echo "❌ ERREUR: Aucun fichier copié - dossier source vide?"
+          exit 1
+        fi
+        
+        # Ajouter un fichier CNAME si présent à la racine
         if [ -f "CNAME" ]; then
-          echo "  🌐 CNAME détecté"
+          echo "  🌐 CNAME détecté à la racine"
           cp CNAME _site_build/
         fi
         
-        # Ajouter un 404.html personnalisé si présent
-        if [ ! -f "404.html" ]; then
+        # Ajouter un 404.html personnalisé si absent
+        if [ ! -f "_site_build/404.html" ]; then
           echo "  🔧 Création d'une page 404 basique..."
           cat > _site_build/404.html << EOF
           <!DOCTYPE html>
@@ -353,6 +405,7 @@ jobs:
         - **Date de déploiement**: $(date)
         - **Environnement**: ${{ env.DEPLOY_ENV }}
         - **Workflow**: ${{ github.workflow }}
+        - **Dossier source**: ${{ env.SOURCE_DIR }}
         
         ## Structure
         Ce site utilise:
@@ -362,7 +415,7 @@ jobs:
         
         ## Maintenance
         Pour mettre à jour le site:
-        1. Modifier les fichiers dans le dépôt
+        1. Modifier les fichiers dans ${{ env.SOURCE_DIR }}/
         2. Pusher les changements
         3. Le déploiement se fera automatiquement
         
@@ -370,9 +423,9 @@ jobs:
         *Généré automatiquement par le workflow de déploiement*
         EOF
         
+        echo ""
         echo "📊 Taille du build: $(du -sh _site_build | cut -f1)"
-        echo "📁 Structure du build:"
-        find _site_build -type f | sed 's/^/  /'
+        echo "✅ Préparation terminée"
 
     - name: Upload to GitHub Pages
       uses: actions/upload-pages-artifact@v3
@@ -396,6 +449,7 @@ jobs:
         echo "🆔 Commit: ${{ github.sha }}"
         echo "👤 Déclenché par: ${{ github.actor }}"
         echo "⏰ Heure: $(date)"
+        echo "📁 Source: ${{ env.SOURCE_DIR }}/"
         echo ""
         echo "🔧 Actions recommandées:"
         echo "  1. Visiter ${{ steps.deployment.outputs.page_url }} pour vérifier"
@@ -432,9 +486,10 @@ jobs:
         - **Branche**: \`${{ github.ref_name }}\`
         - **Auteur**: ${{ github.actor }}
         - **Date**: $(date)
+        - **Dossier source**: ${{ env.SOURCE_DIR }}
         
         ## Validation
-        - ✅ Pré-déploiement validé
+        - ✅ Dossier source validé
         - ✅ Assets vérifiés
         - ✅ Performance analysée
         $(if [ "$DEPLOYMENT_STATUS" = "success" ]; then echo "- ✅ Déployé avec succès"; else echo "- ❌ Échec du déploiement"; fi)
@@ -465,6 +520,7 @@ jobs:
       if: always()
       run: |
         echo "📢 Notification du statut de déploiement..."
+        echo ""
         
         DEPLOYMENT_STATUS=${{ job.status }}
         DEPLOYMENT_URL=${{ steps.deployment.outputs.page_url }}
@@ -482,6 +538,7 @@ jobs:
           echo "- CDN GitHub Pages activé"
           echo "- HTTPS automatique"
           echo "- Surveillance en cours"
+          echo "- Dossier source: ${{ env.SOURCE_DIR }}/"
         else
           echo "❌ DÉPLOIEMENT ÉCHOUÉ"
           echo ""
@@ -489,8 +546,9 @@ jobs:
           echo ""
           echo "🔧 Actions recommandées:"
           echo "1. Vérifier les logs du workflow"
-          echo "2. Corriger les problèmes identifiés"
-          echo "3. Relancer le déploiement"
+          echo "2. Vérifier le dossier ${{ env.SOURCE_DIR }}/"
+          echo "3. Corriger les problèmes identifiés"
+          echo "4. Relancer le déploiement"
           echo ""
           echo "⚠️  Le site précédent reste disponible"
         fi
