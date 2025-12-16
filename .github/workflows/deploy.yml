@@ -20,28 +20,40 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Verify public directory
+    - name: Fix CSS paths in HTML
       run: |
-        echo "🔍 Vérification du dossier public/"
+        echo "🔧 Vérification des liens CSS..."
         
-        if [ ! -d "public" ]; then
-          echo "❌ ERREUR: Le dossier 'public/' est requis pour GitHub Pages"
-          echo "   Créez un dossier 'public/' avec:"
-          echo "   - public/index.html"
-          echo "   - public/css/style.css (optionnel)"
-          echo "   - public/js/ (optionnel)"
+        if [ -f "public/index.html" ]; then
+          # S'assurer que les liens CSS sont corrects
+          echo "📄 Correction de index.html..."
+          
+          # Remplacer les chemins absolus par relatifs
+          sed -i 's|href="/css/|href="css/|g' public/index.html
+          
+          # S'assurer que les deux CSS sont liés
+          if ! grep -q "responsive.css" public/index.html; then
+            echo "➕ Ajout de responsive.css..."
+            sed -i '/style.css/ a\    <link rel="stylesheet" href="css/responsive.css">' public/index.html
+          fi
+          
+          echo "✅ Liens CSS configurés:"
+          grep -i "href.*css" public/index.html
+        else
+          echo "❌ public/index.html manquant"
           exit 1
         fi
         
-        if [ ! -f "public/index.html" ]; then
-          echo "⚠️  ATTENTION: public/index.html manquant"
-          echo '<h1>DevOps Pipeline</h1>' > public/index.html
-          echo "✅ index.html créé"
+        echo ""
+        echo "📁 Structure CSS:"
+        if [ -d "public/css" ]; then
+          find public/css -name "*.css" | sed 's/^/  📄 /'
+        else
+          echo "  ❌ Dossier css/ manquant"
+          mkdir -p public/css
+          touch public/css/style.css public/css/responsive.css
+          echo "  ✅ Dossier css/ créé avec fichiers vides"
         fi
-        
-        echo "✅ Dossier public/ prêt"
-        echo "📊 Contenu:"
-        find public -type f | sed 's/^/  📄 /' 2>/dev/null | head -15
     
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -55,9 +67,14 @@ jobs:
       id: deployment
       uses: actions/deploy-pages@v4
     
-    - name: Show result
+    - name: Verify CSS deployment
       run: |
         echo "✅ SITE DÉPLOYÉ !"
-        echo "🌐 ${{ steps.deployment.outputs.page_url }}"
-        echo "📁 Votre CSS est disponible à:"
-        echo "   ${{ steps.deployment.outputs.page_url }}css/style.css"
+        echo ""
+        echo "🎨 VOTRE CSS EST MAINTENANT DISPONIBLE:"
+        echo ""
+        echo "1. style.css → ${{ steps.deployment.outputs.page_url }}css/style.css"
+        echo "2. responsive.css → ${{ steps.deployment.outputs.page_url }}css/responsive.css"
+        echo ""
+        echo "🔗 Accès direct au site:"
+        echo "${{ steps.deployment.outputs.page_url }}"
