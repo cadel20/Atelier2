@@ -2,12 +2,15 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
   pages: write
   id-token: write
+
+env:
+  SOURCE_DIR: public
 
 jobs:
   deploy:
@@ -20,15 +23,35 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Create public/ if missing
+    - name: Verify source directory
       run: |
-        if [ ! -d "public" ]; then
-          mkdir -p public
-          echo '<h1>DevOps Pipeline</h1>' > public/index.html
+        echo "🔍 Checking ${{ env.SOURCE_DIR }}/ directory..."
+        
+        if [ ! -d "${{ env.SOURCE_DIR }}" ]; then
+          echo "📁 Creating ${{ env.SOURCE_DIR }}/ directory..."
+          mkdir -p "${{ env.SOURCE_DIR }}"
+          cat > "${{ env.SOURCE_DIR }}/index.html" << 'EOF'
+          <!DOCTYPE html>
+          <html lang="fr">
+          <head>
+              <meta charset="UTF-8">
+              <title>DevOps Pipeline</title>
+          </head>
+          <body>
+              <h1>DevOps Pipeline CI/CD</h1>
+              <p>Auto-deployed via GitHub Actions</p>
+              <p><small>Commit: ${{ github.sha }}</small></p>
+          </body>
+          </html>
+          EOF
+          echo "✅ Created example site"
+        elif [ ! -f "${{ env.SOURCE_DIR }}/index.html" ]; then
+          echo "⚠️  index.html missing, creating basic version"
+          echo '<h1>DevOps Pipeline</h1><p>Commit: ${{ github.sha }}</p>' > "${{ env.SOURCE_DIR }}/index.html"
         fi
-        if [ ! -f "public/index.html" ]; then
-          echo '<h1>DevOps Pipeline</h1><p>${{ github.sha }}</p>' > public/index.html
-        fi
+        
+        echo "📊 Content of ${{ env.SOURCE_DIR }}/:"
+        ls -la "${{ env.SOURCE_DIR }}/" || echo "Directory is empty"
     
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -36,11 +59,15 @@ jobs:
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
       with:
-        path: "public"
+        path: "${{ env.SOURCE_DIR }}"
     
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v4
     
-    - name: Show URL
-      run: echo "✅ Site déployé: ${{ steps.deployment.outputs.page_url }}"
+    - name: Show result
+      run: |
+        echo "✅ SITE DEPLOYED!"
+        echo "🔗 ${{ steps.deployment.outputs.page_url }}"
+        echo "📁 Source: ${{ env.SOURCE_DIR }}/"
+        echo "🆔 ${{ github.sha }}"
