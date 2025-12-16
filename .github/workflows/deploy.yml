@@ -20,236 +20,40 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Fix ALL paths (CSS + JS + Resources)
+    - name: Fix CSS paths in HTML
       run: |
-        echo "🔧 CORRECTION COMPLÈTE DES CHEMINS..."
-        echo "======================================"
-        
-        # 1. Vérifier que public/ existe
-        if [ ! -d "public" ]; then
-          echo "❌ ERREUR: Dossier 'public/' manquant"
-          echo "   Structure attendue:"
-          echo "   public/"
-          echo "   ├── index.html"
-          echo "   ├── css/"
-          echo "   │   ├── style.css"
-          echo "   │   └── responsive.css"
-          echo "   └── js/"
-          echo "       └── [vos fichiers .js]"
-          exit 1
-        fi
-        
-        # 2. CORRECTION DU HTML (CSS + JS)
-        echo ""
-        echo "📄 Correction de index.html..."
+        echo "🔧 Vérification des liens CSS..."
         
         if [ -f "public/index.html" ]; then
-          # Backup du fichier original
-          cp public/index.html public/index.html.backup
+          # S'assurer que les liens CSS sont corrects
+          echo "📄 Correction de index.html..."
           
-          # A. Correction des chemins CSS
-          echo "  🎨 Correction CSS..."
+          # Remplacer les chemins absolus par relatifs
           sed -i 's|href="/css/|href="css/|g' public/index.html
-          sed -i 's|href="css/style.css"|href="css/style.css"|g' public/index.html
-          sed -i 's|href="css/responsive.css"|href="css/responsive.css"|g' public/index.html
           
-          # Ajouter responsive.css s'il manque
+          # S'assurer que les deux CSS sont liés
           if ! grep -q "responsive.css" public/index.html; then
-            echo "  ➕ Ajout de responsive.css..."
+            echo "➕ Ajout de responsive.css..."
             sed -i '/style.css/ a\    <link rel="stylesheet" href="css/responsive.css">' public/index.html
           fi
           
-          # B. Correction des chemins JavaScript
-          echo "  ⚡ Correction JavaScript..."
-          sed -i 's|src="/js/|src="js/|g' public/index.html
-          sed -i 's|src="js/|src="js/|g' public/index.html
-          
-          # Vérifier et ajouter les scripts JS manquants
-          JS_FILES=$(find public/js -name "*.js" 2>/dev/null | head -5)
-          
-          # Compteur pour voir quels JS sont ajoutés
-          js_added=0
-          
-          for js_file in $JS_FILES; do
-            js_name=$(basename "$js_file")
-            if ! grep -q "$js_name" public/index.html; then
-              echo "  ➕ Ajout de $js_name..."
-              sed -i '/<\/head>/i\    <script src="js/'"$js_name"'"></script>' public/index.html
-              js_added=$((js_added + 1))
-            fi
-          done
-          
-          if [ $js_added -eq 0 ] && [ -n "$JS_FILES" ]; then
-            echo "  ✅ Tous les fichiers JS sont déjà référencés"
-          fi
-          
-          # Ajouter un script de base si aucun JS n'existe
-          if [ -z "$JS_FILES" ] && ! grep -q "<script src=" public/index.html; then
-            echo "  📝 Création d'un script JS de base..."
-            mkdir -p public/js
-            cat > public/js/app.js << 'EOF'
-// DevOps Pipeline CI/CD - JavaScript de base
-console.log('🚀 DevOps Pipeline JS chargé avec succès!');
-
-// Vérifier que le DOM est chargé
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('✅ DOM complètement chargé');
-    
-    // Afficher un message de bienvenue
-    const welcomeMessage = document.createElement('div');
-    welcomeMessage.style.cssText = `
-        background: linear-gradient(45deg, #2563eb, #7c3aed);
-        color: white;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 20px 0;
-        text-align: center;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-    `;
-    welcomeMessage.innerHTML = `
-        <h3>🎉 JavaScript Fonctionnel!</h3>
-        <p>Le JS est correctement chargé et exécuté.</p>
-        <button onclick="showDemoAlert()" style="
-            background: white;
-            color: #2563eb;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 5px;
-            margin-top: 10px;
-            cursor: pointer;
-            font-weight: bold;
-        ">Tester le JS</button>
-    `;
-    
-    // Insérer au début du body
-    document.body.insertBefore(welcomeMessage, document.body.firstChild);
-    
-    // Mettre à jour la date
-    updateDate();
-});
-
-// Fonction de démonstration
-function showDemoAlert() {
-    alert('✅ JavaScript opérationnel!\n\nLe pipeline CI/CD fonctionne parfaitement avec:\n• HTML\n• CSS\n• JavaScript');
-}
-
-// Mettre à jour la date et heure
-function updateDate() {
-    const dateElement = document.getElementById('current-date');
-    if (dateElement) {
-        const now = new Date();
-        const options = {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        };
-        dateElement.textContent = now.toLocaleDateString('fr-FR', options);
-    }
-}
-
-// Exporter les fonctions (si besoin de modules)
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { showDemoAlert, updateDate };
-}
-EOF
-            
-            # Ajouter le script à index.html
-            sed -i '/<\/body>/i\    <script src="js/app.js"></script>' public/index.html
-            echo "  ✅ app.js créé et ajouté"
-          fi
-          
-          # C. Ajouter base href pour GitHub Pages
-          if ! grep -q "<base href" public/index.html; then
-            echo "  🌐 Ajout de base href..."
-            sed -i '/<head>/a\    <base href="./">' public/index.html
-          fi
-          
-          echo "✅ index.html corrigé avec succès"
-          echo ""
-          echo "🔗 Liens vérifiés:"
-          echo "CSS:"
-          grep -i "href.*css" public/index.html | sed 's/^/  /'
-          echo "JavaScript:"
-          grep -i "src.*js" public/index.html | sed 's/^/  /'
-          
+          echo "✅ Liens CSS configurés:"
+          grep -i "href.*css" public/index.html
         else
-          echo "❌ public/index.html manquant - création..."
-          mkdir -p public/css public/js
-          
-          # Créer un index.html complet
-          cat > public/index.html << 'EOF'
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DevOps Pipeline CI/CD</title>
-    <base href="./">
-    
-    <!-- CSS -->
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/responsive.css">
-    
-    <!-- Favicon -->
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚀</text></svg>">
-</head>
-<body>
-    <div class="container">
-        <h1>🚀 DevOps Pipeline CI/CD</h1>
-        <div class="status success">
-            ✅ CSS et JavaScript chargés avec succès
-        </div>
-        
-        <div class="demo">
-            <h3>Test JavaScript</h3>
-            <button onclick="testJavaScript()" class="btn">
-                Cliquer pour tester le JS
-            </button>
-            <p id="js-result"></p>
-        </div>
-        
-        <div class="info">
-            <p><strong>Commit:</strong> ${{ github.sha }}</p>
-            <p><strong>Déployé le:</strong> <span id="current-date">...</span></p>
-        </div>
-    </div>
-    
-    <!-- JavaScript -->
-    <script src="js/app.js"></script>
-    <script>
-        // Script inline de test
-        function testJavaScript() {
-            document.getElementById('js-result').textContent = 
-                '✅ JavaScript fonctionne! ' + new Date().toLocaleTimeString();
-            alert('JavaScript opérationnel!');
-        }
-        
-        // Date actuelle
-        document.getElementById('current-date').textContent = 
-            new Date().toLocaleDateString('fr-FR');
-    </script>
-</body>
-</html>
-EOF
-          
-          echo "✅ index.html créé avec JS intégré"
+          echo "❌ public/index.html manquant"
+          exit 1
         fi
         
-        # 3. VÉRIFICATION DE LA STRUCTURE
         echo ""
-        echo "📁 Structure finale de public/:"
-        find public -type f | sed 's/^/  📄 /' 2>/dev/null | head -20
-        
-        echo ""
-        echo "🔍 Fichiers JavaScript trouvés:"
-        find public -name "*.js" 2>/dev/null | sed 's/^/  ⚡ /'
-        
-        echo ""
-        echo "🎨 Fichiers CSS trouvés:"
-        find public -name "*.css" 2>/dev/null | sed 's/^/  🎨 /'
+        echo "📁 Structure CSS:"
+        if [ -d "public/css" ]; then
+          find public/css -name "*.css" | sed 's/^/  📄 /'
+        else
+          echo "  ❌ Dossier css/ manquant"
+          mkdir -p public/css
+          touch public/css/style.css public/css/responsive.css
+          echo "  ✅ Dossier css/ créé avec fichiers vides"
+        fi
     
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -263,19 +67,14 @@ EOF
       id: deployment
       uses: actions/deploy-pages@v4
     
-    - name: Verify complete deployment
+    - name: Verify CSS deployment
       run: |
-        echo "🎉 DÉPLOIEMENT COMPLET RÉUSSI !"
+        echo "✅ SITE DÉPLOYÉ !"
         echo ""
-        echo "🌐 SITE WEB:"
+        echo "🎨 VOTRE CSS EST MAINTENANT DISPONIBLE:"
+        echo ""
+        echo "1. style.css → ${{ steps.deployment.outputs.page_url }}css/style.css"
+        echo "2. responsive.css → ${{ steps.deployment.outputs.page_url }}css/responsive.css"
+        echo ""
+        echo "🔗 Accès direct au site:"
         echo "${{ steps.deployment.outputs.page_url }}"
-        echo ""
-        echo "📦 RESSOURCES DÉPLOYÉES:"
-        echo ""
-        echo "🎨 CSS:"
-        echo "   • ${{ steps.deployment.outputs.page_url }}css/style.css"
-        echo "   • ${{ steps.deployment.outputs.page_url }}css/responsive.css"
-        echo ""
-        echo "⚡ JAVASCRIPT:"
-        
-       
