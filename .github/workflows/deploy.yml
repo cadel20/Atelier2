@@ -20,7 +20,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Créer public/ si manquant
+    - name: Create public/ if missing
       run: |
         if [ ! -d "public" ]; then
           mkdir -p public
