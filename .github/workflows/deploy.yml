@@ -20,22 +20,28 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Create public/ if missing
+    - name: Verify public directory
       run: |
-        echo "🔍 Checking public/ directory..."
+        echo "🔍 Vérification du dossier public/"
+        
         if [ ! -d "public" ]; then
-          echo "📁 Creating public/ directory..."
-          mkdir -p public
-          echo '<h1>DevOps Pipeline</h1>' > public/index.html
-          echo "✅ Created public/index.html"
+          echo "❌ ERREUR: Le dossier 'public/' est requis pour GitHub Pages"
+          echo "   Créez un dossier 'public/' avec:"
+          echo "   - public/index.html"
+          echo "   - public/css/style.css (optionnel)"
+          echo "   - public/js/ (optionnel)"
+          exit 1
         fi
+        
         if [ ! -f "public/index.html" ]; then
-          echo "📄 Creating index.html..."
-          echo '<h1>DevOps Pipeline</h1><p>Commit: ${{ github.sha }}</p>' > public/index.html
-          echo "✅ Created index.html"
+          echo "⚠️  ATTENTION: public/index.html manquant"
+          echo '<h1>DevOps Pipeline</h1>' > public/index.html
+          echo "✅ index.html créé"
         fi
-        echo "📊 Files in public/:"
-        find public -type f | sed 's/^/  📄 /' 2>/dev/null || echo "  (empty)"
+        
+        echo "✅ Dossier public/ prêt"
+        echo "📊 Contenu:"
+        find public -type f | sed 's/^/  📄 /' 2>/dev/null | head -15
     
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -49,15 +55,9 @@ jobs:
       id: deployment
       uses: actions/deploy-pages@v4
     
-    - name: Show deployment info
+    - name: Show result
       run: |
-        echo "🎉 DEPLOYMENT SUCCESSFUL!"
-        echo ""
-        echo "🌐 Site URL:"
-        echo "${{ steps.deployment.outputs.page_url }}"
-        echo ""
-        echo "📊 Details:"
-        echo "- Commit: ${{ github.sha }}"
-        echo "- Branch: ${{ github.ref_name }}"
-        echo "- Triggered by: ${{ github.actor }}"
-        echo "- Time: $(date)"
+        echo "✅ SITE DÉPLOYÉ !"
+        echo "🌐 ${{ steps.deployment.outputs.page_url }}"
+        echo "📁 Votre CSS est disponible à:"
+        echo "   ${{ steps.deployment.outputs.page_url }}css/style.css"
