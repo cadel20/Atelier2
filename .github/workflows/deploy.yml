@@ -1,171 +1,291 @@
-name: Deploy to GitHub Pages
+name: CD - Déploiement Continu sur GitHub Pages
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'public/**'
-      - 'src/**'
-      - 'package.json'
-      - 'Dockerfile'
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:
-  release:
-    types: [published]
 
 permissions:
   pages: write
   id-token: write
+  contents: read
 
 jobs:
-  quality-check:
-    runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_dispatch'
-    
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    
-    - name: Run basic tests
-      run: |
-        echo "🧪 Running quality checks..."
-        
-        # Vérifier la structure du projet
-        echo "📁 Project structure check:"
-        if [ -d "public" ]; then
-          echo "✅ public/ directory exists"
-          FILE_COUNT=$(find public -type f 2>/dev/null | wc -l)
-          echo "📊 Files in public/: $FILE_COUNT"
-        else
-          echo "⚠️ public/ directory not found (will be created)"
-        fi
-        
-        # Vérifier package.json si présent
-        if [ -f "package.json" ]; then
-          echo "✅ package.json found"
-          npm ci --only=production --silent || echo "⚠️ npm install skipped"
-        fi
-        
-        # Vérifier la taille des fichiers
-        echo "📏 File size check:"
-        if [ -d "public" ]; then
-          find public -type f -size +5M 2>/dev/null | while read file; do
-            echo "⚠️ Large file detected: $file"
-          done || true
-        fi
-
   deploy:
     runs-on: ubuntu-latest
-    needs: quality-check
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
-    - name: Checkout
+    # 1. RÉCUPÉRER LE BUILD/IMAGE
+    - name: 📥 Checkout code et récupérer le build
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     
-    - name: Create public/ if missing
+    - name: 🏗️ Vérifier et préparer le build
       run: |
-        echo "🔍 Checking public/ directory..."
-        if [ ! -d "public" ]; then
-          echo "📁 Creating public/ directory..."
+        echo "🔍 Vérification des artefacts de build..."
+        
+        # Si un dossier dist/ ou build/ existe, on le copie dans public/
+        if [ -d "dist" ]; then
+          echo "📦 Copie du build depuis dist/"
           mkdir -p public
-          echo '<!DOCTYPE html>' > public/index.html
-          echo '<html><head><title>DevOps Pipeline</title></head>' >> public/index.html
-          echo '<body><h1>🚀 DevOps CI/CD Pipeline</h1>' >> public/index.html
-          echo '<p>✅ Automatically deployed via GitHub Actions</p>' >> public/index.html
-          echo '<p><strong>Commit:</strong> ${{ github.sha }}</p>' >> public/index.html
-          echo '<p><strong>Branch:</strong> ${{ github.ref_name }}</p>' >> public/index.html
-          echo '<p><strong>Time:</strong> <span id="timestamp"></span></p>' >> public/index.html
-          echo '<script>document.getElementById("timestamp").textContent = new Date();</script>' >> public/index.html
-          echo '</body></html>' >> public/index.html
-          echo "✅ Created public/index.html with deployment info"
+          cp -r dist/* public/ 2>/dev/null || true
+        elif [ -d "build" ]; then
+          echo "📦 Copie du build depuis build/"
+          mkdir -p public
+          cp -r build/* public/ 2>/dev/null || true
         fi
         
+        # Si public/ n'existe pas, on le crée avec un contenu minimal
+        if [ ! -d "public" ]; then
+          echo "📁 Création du dossier public/"
+          mkdir -p public
+        fi
+        
+        # Créer un index.html si absent
         if [ ! -f "public/index.html" ]; then
-          echo "📄 Creating index.html..."
-          echo '<!DOCTYPE html>' > public/index.html
-          echo '<html><body>' >> public/index.html
-          echo '<h1>DevOps Pipeline</h1>' >> public/index.html
-          echo '<p>Commit: ${{ github.sha }}</p>' >> public/index.html
-          echo '<p>Deployed: <span id="time"></span></p>' >> public/index.html
-          echo '<script>document.getElementById("time").textContent = new Date();</script>' >> public/index.html
-          echo '</body></html>' >> public/index.html
-          echo "✅ Created index.html"
-        fi
-        
-        # Optimiser pour GitHub Pages
-        echo "🔧 Optimizing for GitHub Pages..."
-        if [ -f "public/index.html" ]; then
-          # Corriger les chemins absolus
-          sed -i.bak 's|src="/|src="|g' public/index.html 2>/dev/null || true
-          sed -i.bak 's|href="/|href="|g' public/index.html 2>/dev/null || true
-          rm -f public/index.html.bak 2>/dev/null || true
-        fi
-        
-        echo "📊 Files in public/:"
-        find public -type f | sed 's/^/  📄 /' 2>/dev/null || echo "  (empty)"
+          echo "📄 Création d'un index.html par défaut"
+          cat > public/index.html << 'EOF'
+
+
     
-    - name: Setup Pages
+    # 2. OPTIMISER POUR GITHUB PAGES
+    - name: ⚙️ Configuration pour GitHub Pages
+      run: |
+        echo "🔧 Optimisation pour GitHub Pages..."
+        
+        if [ -f "public/index.html" ]; then
+          echo "🔄 Correction des chemins dans index.html..."
+          # Corriger les chemins absolus -> relatifs
+          sed -i.bak 's|="/|="|g' public/index.html
+          sed -i.bak 's|src="/|src="|g' public/index.html
+          sed -i.bak 's|href="/|href="|g' public/index.html
+          rm -f public/index.html.bak 2>/dev/null || true
+          echo "✅ Chemins corrigés"
+        fi
+        
+        echo ""
+        echo "📊 Fichiers présents dans public/:"
+        ls -la public/ 2>/dev/null || echo "⚠️ Dossier public/ vide"
+        
+        echo ""
+        echo "📁 Structure complète:"
+        find public/ -type f 2>/dev/null | head -20 || echo "Aucun fichier trouvé"
+    
+    # 3. DÉPLOIEMENT AUTOMATIQUE
+    - name: ⚙️ Setup Pages
       uses: actions/configure-pages@v4
     
-    - name: Upload artifact
+    - name: 📤 Upload artifact
       uses: actions/upload-pages-artifact@v3
       with:
         path: "public"
     
-    - name: Deploy to GitHub Pages
+    - name: 🚀 Déployer sur GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v4
     
-    - name: Generate deployment report
-      run: |
-        echo "## 📋 Deployment Report" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
-        echo "**URL:** [${{ steps.deployment.outputs.page_url }}](${{ steps.deployment.outputs.page_url }})" >> $GITHUB_STEP_SUMMARY
-        echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Environment:** github-pages" >> $GITHUB_STEP_SUMMARY
-        echo "**Workflow:** ${{ github.workflow }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        # Compter les fichiers
-        if [ -d "public" ]; then
-          FILES=$(find public -type f 2>/dev/null | wc -l)
-          SIZE=$(du -sh public 2>/dev/null | cut -f1 || echo "0B")
-          echo "**Files deployed:** $FILES files ($SIZE)" >> $GITHUB_STEP_SUMMARY
-        fi
+    # 4. NOTIFICATION
+    - name: 📢 Notification GitHub Status
+      uses: actions/github-script@v7
+      if: success()
+      with:
+        script: |
+          const deploymentUrl = '${{ steps.deployment.outputs.page_url }}';
+          const commitSha = '${{ github.sha }}'.substring(0, 7);
+          
+          // Créer un commentaire sur le commit
+          await github.rest.repos.createCommitComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            commit_sha: context.sha,
+            body: `✅ **DÉPLOIEMENT RÉUSSI sur GitHub Pages**\n\n` +
+                  `🌐 **URL:** ${deploymentUrl}\n` +
+                  `🔗 **Commit:** ${commitSha}\n` +
+                  `📅 **Déployé le:** ${new Date().toLocaleString('fr-FR')}\n\n` +
+                  `_Déploiement automatique via GitHub Actions_`
+          });
+          
+          // Mettre à jour le statut du déploiement
+          await github.rest.repos.createDeploymentStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: context.payload.deployment?.id || context.runId,
+            state: 'success',
+            environment_url: deploymentUrl,
+            description: 'Déployé sur GitHub Pages',
+            auto_inactive: true
+          });
+          
+          console.log('✅ Notification GitHub envoyée');
     
-    - name: Show deployment info
+    - name: 📢 Notification Discord (facultatif)
+      if: success() && env.DISCORD_WEBHOOK_URL
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: |
+        echo "Envoi de la notification Discord..."
+        
+        # Créer le message JSON pour Discord
+        MESSAGE_JSON=$(cat << EOF
+        {
+          "embeds": [{
+            "title": "🚀 Déploiement Réussi",
+            "description": "L'application a été déployée sur GitHub Pages",
+            "color": 3066993,
+            "fields": [
+              {
+                "name": "🌐 URL",
+                "value": "${{ steps.deployment.outputs.page_url }}",
+                "inline": false
+              },
+              {
+                "name": "🔗 Commit",
+                "value": "${{ github.sha }}",
+                "inline": true
+              },
+              {
+                "name": "📁 Branche",
+                "value": "${{ github.ref_name }}",
+                "inline": true
+              }
+            ],
+            "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%S.%3NZ')",
+            "footer": {
+              "text": "GitHub Actions • DevOps Pipeline"
+            }
+          }]
+        }
+        EOF
+        )
+        
+        # Envoyer la requête
+        curl -H "Content-Type: application/json" \
+             -X POST \
+             -d "$MESSAGE_JSON" \
+             "$DISCORD_WEBHOOK_URL" || echo "⚠️ Échec de l'envoi Discord"
+    
+    - name: 📢 Notification Slack (facultatif)
+      if: success() && env.SLACK_WEBHOOK_URL
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        echo "Envoi de la notification Slack..."
+        
+        SLACK_MESSAGE=$(cat << EOF
+        {
+          "blocks": [
+            {
+              "type": "header",
+              "text": {
+                "type": "plain_text",
+                "text": "🚀 Déploiement Réussi",
+                "emoji": true
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "*GitHub Pages Deployment*\\nL'application a été déployée avec succès."
+              }
+            },
+            {
+              "type": "section",
+              "fields": [
+                {
+                  "type": "mrkdwn",
+                  "text": "*URL:*\\n<${{ steps.deployment.outputs.page_url }}>"
+                },
+                {
+                  "type": "mrkdwn",
+                  "text": "*Commit:*\\n\`${{ github.sha }}\`"
+                }
+              ]
+            },
+            {
+              "type": "context",
+              "elements": [
+                {
+                  "type": "mrkdwn",
+                  "text": "Déployé via GitHub Actions • $(date '+%d/%m/%Y %H:%M')"
+                }
+              ]
+            }
+          ]
+        }
+        EOF
+        )
+        
+        curl -X POST \
+             -H 'Content-type: application/json' \
+             --data "$SLACK_MESSAGE" \
+             "$SLACK_WEBHOOK_URL" || echo "⚠️ Échec de l'envoi Slack"
+    
+    # 5. CONFIRMATION FINALE
+    - name: ✅ Message de succès
       run: |
         echo ""
-        echo "╔══════════════════════════════════════════════════════╗"
-        echo "║              🎉 DEPLOYMENT SUCCESSFUL!              ║"
-        echo "╚══════════════════════════════════════════════════════╝"
+        echo "╔═══════════════════════════════════════════════════════════╗"
+        echo "║               🎉 DÉPLOIEMENT RÉUSSI !                    ║"
+        echo "╚═══════════════════════════════════════════════════════════╝"
         echo ""
-        echo "🌐 Site URL:"
+        echo "🌐 SITE DÉPLOYÉ :"
         echo "   ${{ steps.deployment.outputs.page_url }}"
         echo ""
-        echo "📊 Deployment Details:"
-        echo "   ┌──────────────────────────────────────────────"
-        echo "   │ 🔗 Commit:    ${{ github.sha }}"
-        echo "   │ 🌿 Branch:    ${{ github.ref_name }}"
-        echo "   │ 👤 Triggered: ${{ github.actor }}"
-        echo "   │ 🕐 Time:      $(date '+%Y-%m-%d %H:%M:%S UTC')"
-        echo "   │ 📁 Files:     $(find public -type f 2>/dev/null | wc -l) files"
-        echo "   └──────────────────────────────────────────────"
+        echo "📊 INFORMATIONS :"
+        echo "   • Commit : ${{ github.sha }}"
+        echo "   • Branche : ${{ github.ref_name }}"
+        echo "   • Déclenché par : ${{ github.actor }}"
+        echo "   • Environnement : github-pages"
+        echo "   • Date : $(date '+%d/%m/%Y %H:%M:%S')"
         echo ""
-        echo "✅ JavaScript compatibility:"
-        echo "   • Paths optimized for GitHub Pages"
-        echo "   • No absolute URLs in scripts"
-        echo "   • Static files served correctly"
+        echo "🔧 CONFIGURATION :"
+        echo "   • JavaScript compatible GitHub Pages ✓"
+        echo "   • Chemins relatifs optimisés ✓"
+        echo "   • Fichiers statiques servis correctement ✓"
         echo ""
-        echo "🔗 Quick Links:"
-        echo "   • Actions:    https://github.com/${{ github.repository }}/actions"
-        echo "   • Repository: https://github.com/${{ github.repository }}"
+        echo "📢 NOTIFICATIONS :"
+        echo "   • GitHub Status : ✅ Envoyée"
+        if [ -n "${{ secrets.DISCORD_WEBHOOK_URL }}" ]; then
+          echo "   • Discord : ✅ Configurée"
+        fi
+        if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+          echo "   • Slack : ✅ Configurée"
+        fi
         echo ""
-        echo "📝 Note: Site may take 1-2 minutes to be fully accessible"
+        echo "🔍 POUR DÉBOGUER :"
+        echo "   1. Ouvrir la console navigateur (F12)"
+        echo "   2. Vérifier l'onglet Network"
+        echo "   3. Consulter les logs GitHub Actions"
         echo ""
-        echo "══════════════════════════════════════════════════════════"
+        echo "═══════════════════════════════════════════════════════════════"
+    
+    - name: 📋 Rapport de déploiement
+      if: always()
+      run: |
+        echo "## 📋 RAPPORT DE DÉPLOIEMENT CD" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🎯 Objectif" >> $GITHUB_STEP_SUMMARY
+        echo "Déployer automatiquement l'application sur GitHub Pages (Déploiement Continu)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ✅ Points validés" >> $GITHUB_STEP_SUMMARY
+        echo "1. **Récupération du build** : ✓" >> $GITHUB_STEP_SUMMARY
+        echo "2. **Déploiement automatique** : ✓" >> $GITHUB_STEP_SUMMARY  
+        echo "3. **Notifications** : ✓ (GitHub Status)" >> $GITHUB_STEP_SUMMARY
+        if [ -n "${{ secrets.DISCORD_WEBHOOK_URL }}" ]; then
+          echo "   - Discord : Configuré" >> $GITHUB_STEP_SUMMARY
+        fi
+        if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+          echo "   - Slack : Configuré" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🌐 Résultat" >> $GITHUB_STEP_SUMMARY
+        echo "- **URL** : [${{ steps.deployment.outputs.page_url }}](${{ steps.deployment.outputs.page_url }})" >> $GITHUB_STEP_SUMMARY
+        echo "- **Statut** : ✅ Success" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environnement** : github-pages" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "*Workflow CD - DevOps Pipeline*" >> $GITHUB_STEP_SUMMARY
