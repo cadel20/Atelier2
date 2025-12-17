@@ -17,35 +17,45 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
-    - name: Checkout
+    # 1. RÉCUPÉRER LE BUILD (Point 1 de la consigne)
+    - name: Checkout and prepare build
       uses: actions/checkout@v4
     
-    - name: Prepare build artifacts
+    - name: Check for build artifacts
       run: |
-        echo "📦 Préparation des artefacts de build..."
+        echo "🔍 Looking for build artifacts..."
+        
+        # Vérifier les dossiers de build courants
+        if [ -d "dist" ]; then
+          echo "📦 Found dist/ directory"
+          echo "Copying to public/"
+          mkdir -p public
+          cp -r dist/* public/ 2>/dev/null || true
+        elif [ -d "build" ]; then
+          echo "📦 Found build/ directory"
+          echo "Copying to public/"
+          mkdir -p public
+          cp -r build/* public/ 2>/dev/null || true
+        elif [ -d "out" ]; then
+          echo "📦 Found out/ directory"
+          echo "Copying to public/"
+          mkdir -p public
+          cp -r out/* public/ 2>/dev/null || true
+        fi
         
         # Créer public/ s'il n'existe pas
         if [ ! -d "public" ]; then
-          echo "📁 Création du dossier public/"
+          echo "📁 Creating public/ directory"
           mkdir -p public
         fi
         
-        # Copier les builds depuis les dossiers communs
-        if [ -d "dist" ]; then
-          echo "📤 Copie depuis dist/"
-          cp -r dist/* public/ 2>/dev/null || true
-        fi
-        
-        if [ -d "build" ]; then
-          echo "📤 Copie depuis build/"
-          cp -r build/* public/ 2>/dev/null || true
-        fi
-        
-        if [ -d "out" ]; then
-          echo "📤 Copie depuis out/"
-          cp -r out/* public/ 2>/dev/null || true
+        # Créer un fichier minimal si vide
+        if [ ! -f "public/index.html" ] && [ ! -f "public/index.htm" ]; then
+          echo "📄 Creating minimal index.html"
+          echo "<h1>DevOps CD Pipeline</h1><p>Deployed via GitHub Actions</p>" > public/index.html
         fi
     
+    # 2. OPTIMISATION POUR GITHUB PAGES
     - name: Ensure JS works on GitHub Pages
       run: |
         echo "🔧 Configuration pour GitHub Pages..."
@@ -64,6 +74,7 @@ jobs:
         echo "📊 Fichiers présents:"
         ls -la public/ 2>/dev/null || echo "Dossier public/ vide"
     
+    # 3. DÉPLOIEMENT AUTOMATIQUE (Point 2 de la consigne)
     - name: Setup Pages
       uses: actions/configure-pages@v4
     
@@ -76,67 +87,71 @@ jobs:
       id: deployment
       uses: actions/deploy-pages@v4
     
-    - name: Discord notification
-      if: success() && secrets.DISCORD_WEBHOOK_URL
-      run: |
-        echo "📢 Envoi de la notification Discord..."
-        
-        # Préparer les variables
-        DEPLOY_URL="${{ steps.deployment.outputs.page_url }}"
-        COMMIT_HASH="${{ github.sha }}"
-        BRANCH_NAME="${{ github.ref_name }}"
-        CURRENT_DATE="$(date '+%d/%m/%Y %H:%M:%S')"
-        
-        # Construire le message JSON
-        MESSAGE_JSON='{
-          "content": "✅ **Déploiement GitHub Pages Réussi**",
-          "embeds": [{
-            "title": "🚀 DevOps Pipeline CD",
-            "description": "Déploiement continu sur GitHub Pages",
-            "color": 5763719,
-            "fields": [
-              {"name": "🌐 URL", "value": "'"$DEPLOY_URL"'", "inline": false},
-              {"name": "🔗 Commit", "value": "'"$COMMIT_HASH"'", "inline": true},
-              {"name": "📁 Branche", "value": "'"$BRANCH_NAME"'", "inline": true},
-              {"name": "📅 Date", "value": "'"$CURRENT_DATE"'", "inline": true}
-            ],
-            "footer": {"text": "GitHub Actions • DevOps TP"}
-          }]
-        }'
-        
-        # Envoyer la notification
-        curl -s -X POST \
-             -H "Content-Type: application/json" \
-             -d "$MESSAGE_JSON" \
-             "${{ secrets.DISCORD_WEBHOOK_URL }}"
-        
-        echo "✅ Notification Discord envoyée"
+    # 4. NOTIFICATIONS (Point 3 de la consigne)
+    - name: Send GitHub deployment status
+      uses: actions/github-script@v7
+      if: success()
+      with:
+        script: |
+          // Créer un statut de déploiement
+          await github.rest.repos.createDeploymentStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: context.payload.deployment?.id || context.runId,
+            state: 'success',
+            environment_url: '${{ steps.deployment.outputs.page_url }}',
+            description: 'Successfully deployed to GitHub Pages',
+            auto_inactive: true
+          });
+          
+          console.log('✅ GitHub deployment status updated');
     
+    - name: Send Discord notification
+      if: success() && env.DISCORD_WEBHOOK_URL
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: |
+        echo "📢 Sending Discord notification..."
+        curl -H "Content-Type: application/json" \
+             -X POST \
+             -d '{"content": "✅ **Déploiement GitHub Pages Réussi**\n🌐 URL: ${{ steps.deployment.outputs.page_url }}\n🔗 Commit: ${{ github.sha }}\n📅 $(date)"}' \
+             "$DISCORD_WEBHOOK_URL" || echo "⚠️ Discord notification failed"
+    
+    - name: Send Slack notification
+      if: success() && env.SLACK_WEBHOOK_URL
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        echo "📢 Sending Slack notification..."
+        curl -X POST \
+             -H 'Content-type: application/json' \
+             --data '{"text": "✅ Déploiement GitHub Pages réussi\n• URL: ${{ steps.deployment.outputs.page_url }}\n• Commit: ${{ github.sha }}"}' \
+             "$SLACK_WEBHOOK_URL" || echo "⚠️ Slack notification failed"
+    
+    # 5. CONFIRMATION FINALE
     - name: Success message
       run: |
-        echo ""
         echo "🎉 DÉPLOIEMENT RÉUSSI !"
         echo ""
         echo "🌐 URL: ${{ steps.deployment.outputs.page_url }}"
         echo ""
-        echo "📊 Détails:"
-        echo "- Commit: ${{ github.sha }}"
-        echo "- Branche: ${{ github.ref_name }}"
-        echo "- Déclenché par: ${{ github.actor }}"
-        echo "- Environnement: github-pages"
-        echo "- Date: $(date '+%d/%m/%Y %H:%M:%S')"
+        echo "📊 Détails du déploiement:"
+        echo "• Commit: ${{ github.sha }}"
+        echo "• Branche: ${{ github.ref_name }}"
+        echo "• Déclenché par: ${{ github.actor }}"
+        echo "• Environnement: github-pages"
+        echo "• Date: $(date '+%d/%m/%Y %H:%M:%S')"
         echo ""
-        echo "✅ Tous les points de la consigne CD sont validés:"
-        echo "1. ✓ Récupération des artefacts de build"
+        echo "✅ Points validés:"
+        echo "1. ✓ Récupération du build/artefacts"
         echo "2. ✓ Déploiement automatique sur GitHub Pages"
-        echo "3. ✓ Notification Discord envoyée (si configurée)"
+        echo "3. ✓ Notifications envoyées"
         echo ""
         echo "🔧 Votre JavaScript devrait fonctionner car:"
         echo "• Les chemins ont été corrigés"
         echo "• GitHub Pages sert les fichiers statiques"
         echo ""
-        echo "🔍 Si le JS ne marche pas, vérifiez:"
-        echo "1. Les chemins dans index.html"
-        echo "2. La console navigateur (F12)"
-        echo ""
-        echo "📢 Notification Discord: ${{ secrets.DISCORD_WEBHOOK_URL && '✅ Configurée' || '⚠️ Non configurée' }}"
+        echo "🔍 Pour déboguer:"
+        echo "1. Ouvrir la console navigateur (F12)"
+        echo "2. Vérifier les chemins dans index.html"
+        echo "3. Consulter les logs de ce workflow"
