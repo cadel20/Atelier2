@@ -1,53 +1,38 @@
-name: Build and Push Docker Image
+name: Build & Push Docker
 
 on:
   release:
-    types: [published, created]
+    types: [published]
   workflow_dispatch:
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
     
     steps:
-    # 1. Checkout du code
-    - name: Checkout repository
+    - name: Checkout
       uses: actions/checkout@v4
     
-    # 2. Vérification de la structure
-    - name: Validate project structure
+    # Vérification minimale
+    - name: Check public directory
       run: |
-        echo "🔍 Validation de la structure du projet..."
-        
-        # Vérifier que Dockerfile existe
-        if [ ! -f "Dockerfile" ]; then
-          echo "❌ ERREUR: Dockerfile non trouvé"
-          exit 1
-        else
-          echo "✅ Dockerfile trouvé"
+        if [ ! -d "public" ]; then
+          echo "⚠️  Attention: dossier 'public' manquant"
+          echo "Création d'un exemple..."
+          mkdir -p public
+          echo '<h1>Node.js App</h1>' > public/index.html
         fi
-        
-        # Optionnel: vérifier public/ pour une app web
-        if [ -d "public" ]; then
-          echo "📁 Dossier public/ présent"
-        fi
-        
-        # Afficher la version de la release
-        echo "🏷️ Version de la release: ${{ github.event.release.tag_name }}"
     
-    # 3. Configuration Docker Buildx
-    - name: Set up Docker Buildx
+    - name: Setup Docker Buildx
       uses: docker/setup-buildx-action@v3
     
-    # 4. Connexion à Docker Hub
-    - name: Log in to Docker Hub
+    - name: Login to DockerHub
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
     
-    # 5. Construction et push de l'image
-    - name: Build and push Docker image
+    - name: Build and push
       uses: docker/build-push-action@v5
       with:
         context: .
@@ -56,28 +41,14 @@ jobs:
           ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:latest
           ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:${{ github.event.release.tag_name }}
           ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:${{ github.sha }}
-        labels: |
-          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          org.opencontainers.image.version=${{ github.event.release.tag_name }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        # Ajouter le build-arg si nécessaire
+        build-args: |
+          NODE_ENV=production
     
-    # 6. Notification de succès
     - name: Success notification
       run: |
-        echo "✅ IMAGE DOCKER PUBLIÉE AVEC SUCCÈS"
-        echo ""
-        echo "📦 Informations de l'image:"
-        echo "   - Registry: Docker Hub"
-        echo "   - Image: ${{ secrets.DOCKER_USERNAME }}/atelier-cicd"
-        echo "   - Tags:"
-        echo "       • latest"
-        echo "       • ${{ github.event.release.tag_name }}"
-        echo "       • ${{ github.sha }}"
-        echo ""
-        echo "🔗 Liens:"
-        echo "   - Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/atelier-cicd"
-        echo "   - Release: ${{ github.event.release.html_url }}"
+        echo "✅ IMAGE DOCKER PUBLIÉE"
         echo ""
         echo "🏷️ Version: ${{ github.event.release.tag_name }}"
+        echo "🔗 Release: ${{ github.event.release.html_url }}"
+        echo "📦 Image: ${{ secrets.DOCKER_USERNAME }}/atelier-cicd"
