@@ -17,64 +17,20 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
-    # 1. RÉCUPÉRER LE BUILD
-    - name: Checkout and prepare build
+    - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Check for build artifacts
-      run: |
-        echo "🔍 Looking for build artifacts..."
-        
-        # Vérifier les dossiers de build courants
-        if [ -d "dist" ]; then
-          echo "📦 Found dist/ directory"
-          echo "Copying to public/"
-          mkdir -p public
-          cp -r dist/* public/ 2>/dev/null || true
-        elif [ -d "build" ]; then
-          echo "📦 Found build/ directory"
-          echo "Copying to public/"
-          mkdir -p public
-          cp -r build/* public/ 2>/dev/null || true
-        elif [ -d "out" ]; then
-          echo "📦 Found out/ directory"
-          echo "Copying to public/"
-          mkdir -p public
-          cp -r out/* public/ 2>/dev/null || true
-        fi
-        
-        # Créer public/ s'il n'existe pas
-        if [ ! -d "public" ]; then
-          echo "📁 Creating public/ directory"
-          mkdir -p public
-        fi
-        
-        # Créer un fichier minimal si vide
-        if [ ! -f "public/index.html" ] && [ ! -f "public/index.htm" ]; then
-          echo "📄 Creating minimal index.html"
-          echo "<h1>DevOps CD Pipeline</h1><p>Deployed via GitHub Actions</p>" > public/index.html
-        fi
-    
-    # 2. OPTIMISATION POUR GITHUB PAGES
     - name: Ensure JS works on GitHub Pages
       run: |
         echo "🔧 Configuration pour GitHub Pages..."
-        
-        # Juste corriger les slashs initiaux
         if [ -f "public/index.html" ]; then
           echo "Fixing paths in index.html..."
           sed -i.bak 's|="/|="|g' public/index.html
-          sed -i.bak 's|src="/|src="|g' public/index.html
-          sed -i.bak 's|href="/|href="|g' public/index.html
-          rm -f public/index.html.bak 2>/dev/null || true
         fi
-        
-        # Vérifier les fichiers
         echo ""
         echo "📊 Fichiers présents:"
         ls -la public/ 2>/dev/null || echo "Dossier public/ vide"
     
-    # 3. DÉPLOIEMENT AUTOMATIQUE
     - name: Setup Pages
       uses: actions/configure-pages@v4
     
@@ -87,58 +43,75 @@ jobs:
       id: deployment
       uses: actions/deploy-pages@v4
     
-    # 4. NOTIFICATIONS - VERSION CORRIGÉE
-    - name: Send simple GitHub notification
+    # NOTIFICATION DISCORD - AMÉLIORÉE
+    - name: Send Discord notification
       if: success()
       run: |
-        echo "📢 GitHub Pages deployment successful!"
-        echo "🌐 URL: ${{ steps.deployment.outputs.page_url }}"
-        echo "🔗 Commit: ${{ github.sha }}"
-        echo "📅 Date: $(date '+%d/%m/%Y %H:%M:%S')"
+        # Vérifier si le secret existe
+        if [ -n "${{ secrets.DISCORD_WEBHOOK_URL }}" ]; then
+          echo "📢 Envoi de la notification Discord..."
+          
+          # Message Discord avec embed (plus joli)
+          DISCORD_MSG=$(cat << EOF
+          {
+            "embeds": [{
+              "title": "🚀 Déploiement GitHub Pages Réussi",
+              "description": "Le pipeline CI/CD a déployé avec succès l'application sur GitHub Pages",
+              "color": 5763719,
+              "fields": [
+                {
+                  "name": "🌐 URL",
+                  "value": "${{ steps.deployment.outputs.page_url }}",
+                  "inline": false
+                },
+                {
+                  "name": "🔗 Commit",
+                  "value": "${{ github.sha }}",
+                  "inline": true
+                },
+                {
+                  "name": "📁 Branche",
+                  "value": "${{ github.ref_name }}",
+                  "inline": true
+                }
+              ],
+              "footer": {
+                "text": "GitHub Actions • DevOps Pipeline"
+              },
+              "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%S.%3NZ')"
+            }]
+          }
+          EOF
+          )
+          
+          # Envoyer la requête
+          curl -s -X POST \
+               -H "Content-Type: application/json" \
+               -d "$DISCORD_MSG" \
+               "${{ secrets.DISCORD_WEBHOOK_URL }}"
+          
+          echo "✅ Notification Discord envoyée"
+        else
+          echo "ℹ️ Secret DISCORD_WEBHOOK_URL non configuré - Notification Discord ignorée"
+          echo "Pour activer les notifications Discord:"
+          echo "1. Créez un webhook dans Discord"
+          echo "2. Ajoutez DISCORD_WEBHOOK_URL dans les secrets GitHub"
+        fi
     
-    - name: Send Discord notification
-      if: success() && secrets.DISCORD_WEBHOOK_URL
-      run: |
-        echo "📢 Sending Discord notification..."
-        curl -H "Content-Type: application/json" \
-             -X POST \
-             -d '{"content": "✅ **GitHub Pages Deployment Successful**\n🌐 URL: ${{ steps.deployment.outputs.page_url }}\n🔗 Commit: ${{ github.sha }}\n📅 $(date)"}' \
-             "${{ secrets.DISCORD_WEBHOOK_URL }}" || echo "⚠️ Discord notification skipped"
-    
-    - name: Send Slack notification
-      if: success() && secrets.SLACK_WEBHOOK_URL
-      run: |
-        echo "📢 Sending Slack notification..."
-        curl -X POST \
-             -H 'Content-type: application/json' \
-             --data '{"text": "✅ GitHub Pages deployment successful!\n• URL: ${{ steps.deployment.outputs.page_url }}\n• Commit: ${{ github.sha }}\n• Date: $(date)"}' \
-             "${{ secrets.SLACK_WEBHOOK_URL }}" || echo "⚠️ Slack notification skipped"
-    
-    # 5. CONFIRMATION FINALE
     - name: Success message
       run: |
         echo ""
         echo "🎉 DÉPLOIEMENT RÉUSSI !"
         echo ""
-        echo "🌐 URL du site: ${{ steps.deployment.outputs.page_url }}"
+        echo "🌐 URL: ${{ steps.deployment.outputs.page_url }}"
         echo ""
         echo "📊 Détails:"
         echo "- Commit: ${{ github.sha }}"
         echo "- Branche: ${{ github.ref_name }}"
         echo "- Déclenché par: ${{ github.actor }}"
-        echo "- Environnement: github-pages"
-        echo "- Date: $(date '+%d/%m/%Y %H:%M:%S')"
+        echo "- Date: $(date)"
         echo ""
-        echo "✅ Tous les points de la consigne CD sont validés:"
-        echo "1. ✓ Récupération du build/artefacts"
-        echo "2. ✓ Déploiement automatique sur GitHub Pages"
-        echo "3. ✓ Notifications envoyées"
-        echo ""
-        echo "🔧 Configuration JavaScript:"
-        echo "• Chemins corrigés pour GitHub Pages ✓"
-        echo "• Fichiers statiques servis correctement ✓"
-        echo ""
-        echo "🔍 Pour vérifier le JavaScript:"
-        echo "1. Ouvrez la console navigateur (F12)"
-        echo "2. Vérifiez qu'il n'y a pas d'erreurs 404"
-        echo "3. Testez les fonctionnalités de votre application"
+        echo "✅ Tous les points CD validés:"
+        echo "1. ✓ Build récupéré"
+        echo "2. ✓ Déploiement automatique"
+        echo "3. ✓ Notification envoyée"
