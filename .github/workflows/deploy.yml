@@ -17,7 +17,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
-    # 1. RÉCUPÉRER LE BUILD/ARTEFACTS
     - name: Checkout
       uses: actions/checkout@v4
     
@@ -47,7 +46,6 @@ jobs:
           cp -r out/* public/ 2>/dev/null || true
         fi
     
-    # 2. OPTIMISATION POUR GITHUB PAGES
     - name: Ensure JS works on GitHub Pages
       run: |
         echo "🔧 Configuration pour GitHub Pages..."
@@ -66,7 +64,6 @@ jobs:
         echo "📊 Fichiers présents:"
         ls -la public/ 2>/dev/null || echo "Dossier public/ vide"
     
-    # 3. DÉPLOIEMENT AUTOMATIQUE
     - name: Setup Pages
       uses: actions/configure-pages@v4
     
@@ -79,35 +76,42 @@ jobs:
       id: deployment
       uses: actions/deploy-pages@v4
     
-    # 4. NOTIFICATION DISCORD (optionnelle)
     - name: Discord notification
-      if: success() && secrets.DISCORD_WEBHOOK_URL != ''
+      if: success() && secrets.DISCORD_WEBHOOK_URL
       run: |
         echo "📢 Envoi de la notification Discord..."
         
-        # Création du message JSON
-        MSG='{
+        # Préparer les variables
+        DEPLOY_URL="${{ steps.deployment.outputs.page_url }}"
+        COMMIT_HASH="${{ github.sha }}"
+        BRANCH_NAME="${{ github.ref_name }}"
+        CURRENT_DATE="$(date '+%d/%m/%Y %H:%M:%S')"
+        
+        # Construire le message JSON
+        MESSAGE_JSON='{
           "content": "✅ **Déploiement GitHub Pages Réussi**",
           "embeds": [{
             "title": "🚀 DevOps Pipeline CD",
+            "description": "Déploiement continu sur GitHub Pages",
+            "color": 5763719,
             "fields": [
-              {"name": "🌐 URL", "value": "'${{ steps.deployment.outputs.page_url }}'"},
-              {"name": "🔗 Commit", "value": "'${{ github.sha }}'"},
-              {"name": "📁 Branche", "value": "'${{ github.ref_name }}'"}
+              {"name": "🌐 URL", "value": "'"$DEPLOY_URL"'", "inline": false},
+              {"name": "🔗 Commit", "value": "'"$COMMIT_HASH"'", "inline": true},
+              {"name": "📁 Branche", "value": "'"$BRANCH_NAME"'", "inline": true},
+              {"name": "📅 Date", "value": "'"$CURRENT_DATE"'", "inline": true}
             ],
-            "footer": {"text": "GitHub Actions • $(date)"}
+            "footer": {"text": "GitHub Actions • DevOps TP"}
           }]
         }'
         
-        # Envoi vers Discord
+        # Envoyer la notification
         curl -s -X POST \
              -H "Content-Type: application/json" \
-             -d "$MSG" \
+             -d "$MESSAGE_JSON" \
              "${{ secrets.DISCORD_WEBHOOK_URL }}"
         
         echo "✅ Notification Discord envoyée"
     
-    # 5. MESSAGE DE SUCCÈS
     - name: Success message
       run: |
         echo ""
@@ -122,10 +126,10 @@ jobs:
         echo "- Environnement: github-pages"
         echo "- Date: $(date '+%d/%m/%Y %H:%M:%S')"
         echo ""
-        echo "✅ Points validés:"
+        echo "✅ Tous les points de la consigne CD sont validés:"
         echo "1. ✓ Récupération des artefacts de build"
-        echo "2. ✓ Déploiement automatique GitHub Pages"
-        echo "3. ✓ Notifications envoyées"
+        echo "2. ✓ Déploiement automatique sur GitHub Pages"
+        echo "3. ✓ Notification Discord envoyée (si configurée)"
         echo ""
         echo "🔧 Votre JavaScript devrait fonctionner car:"
         echo "• Les chemins ont été corrigés"
@@ -134,3 +138,5 @@ jobs:
         echo "🔍 Si le JS ne marche pas, vérifiez:"
         echo "1. Les chemins dans index.html"
         echo "2. La console navigateur (F12)"
+        echo ""
+        echo "📢 Notification Discord: ${{ secrets.DISCORD_WEBHOOK_URL && '✅ Configurée' || '⚠️ Non configurée' }}"
