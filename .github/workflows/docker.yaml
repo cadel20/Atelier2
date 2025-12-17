@@ -3,7 +3,9 @@ name: Build & Push Docker
 on:
   release:
     types: [published]
-  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
 
 jobs:
   build:
@@ -12,16 +14,6 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-    
-    # Vérification des secrets Docker
-    - name: Validate Docker secrets
-      run: |
-        echo "🔍 Vérification des secrets Docker..."
-        if [ -z "${{ secrets.DOCKER_USERNAME }}" ]; then
-          echo "❌ ERREUR: DOCKER_USERNAME non configuré"
-          exit 1
-        fi
-        echo "✅ Utilisateur Docker: ${{ secrets.DOCKER_USERNAME }}"
     
     # Vérification minimale
     - name: Check public directory
@@ -43,29 +35,19 @@ jobs:
         password: ${{ secrets.DOCKER_PASSWORD }}
     
     - name: Build and push
-      id: docker_build
       uses: docker/build-push-action@v5
       with:
         context: .
         push: true
         tags: |
           ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:latest
-        # N'ajoute le tag de version QUE si c'est une release
-        tags: ${{ github.event_name == 'release' && format('{0}/atelier-cicd:{1}', secrets.DOCKER_USERNAME, github.event.release.tag_name) || format('{0}/atelier-cicd:manual-{1}', secrets.DOCKER_USERNAME, github.sha) }}
+          ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:${{ github.sha }}
+        # Ajouter le build-arg si nécessaire
+        build-args: |
+          NODE_ENV=production
     
     - name: Success notification
       run: |
         echo "✅ IMAGE DOCKER PUBLIÉE"
-        echo ""
-        echo "📦 Image: ${{ secrets.DOCKER_USERNAME }}/atelier-cicd"
-        echo "🐳 Tags:"
-        
-        if [ "${{ github.event_name }}" = "release" ]; then
-          echo "  - ${{ github.event.release.tag_name }}"
-          echo "  - latest"
-          echo "🔗 Release: ${{ github.event.release.html_url }}"
-        else
-          echo "  - manual-${{ github.sha }}"
-          echo "  - latest"
-          echo "🚀 Déclenché manuellement"
-        fi
+        echo "📦 Tags: latest, ${{ github.sha }}"
+        echo "👤 Utilisateur: ${{ secrets.DOCKER_USERNAME }}"
