@@ -19,15 +19,9 @@ jobs:
         echo "🔍 Vérification des secrets Docker..."
         if [ -z "${{ secrets.DOCKER_USERNAME }}" ]; then
           echo "❌ ERREUR: DOCKER_USERNAME non configuré"
-          echo "Configurez le secret DOCKER_USERNAME dans GitHub"
           exit 1
         fi
-        if [ -z "${{ secrets.DOCKER_PASSWORD }}" ]; then
-          echo "❌ ERREUR: DOCKER_PASSWORD non configuré"
-          echo "Configurez le secret DOCKER_PASSWORD dans GitHub"
-          exit 1
-        fi
-        echo "✅ Secrets Docker configurés"
+        echo "✅ Utilisateur Docker: ${{ secrets.DOCKER_USERNAME }}"
     
     # Vérification minimale
     - name: Check public directory
@@ -49,19 +43,29 @@ jobs:
         password: ${{ secrets.DOCKER_PASSWORD }}
     
     - name: Build and push
+      id: docker_build
       uses: docker/build-push-action@v5
       with:
         context: .
         push: true
         tags: |
           ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:latest
-          ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:${{ github.event.release.tag_name }}
+        # N'ajoute le tag de version QUE si c'est une release
+        tags: ${{ github.event_name == 'release' && format('{0}/atelier-cicd:{1}', secrets.DOCKER_USERNAME, github.event.release.tag_name) || format('{0}/atelier-cicd:manual-{1}', secrets.DOCKER_USERNAME, github.sha) }}
     
     - name: Success notification
       run: |
         echo "✅ IMAGE DOCKER PUBLIÉE"
         echo ""
-        echo "🏷️ Version: ${{ github.event.release.tag_name }}"
-        echo "🔗 Release: ${{ github.event.release.html_url }}"
         echo "📦 Image: ${{ secrets.DOCKER_USERNAME }}/atelier-cicd"
-        echo "🐳 Tags: latest, ${{ github.event.release.tag_name }}"
+        echo "🐳 Tags:"
+        
+        if [ "${{ github.event_name }}" = "release" ]; then
+          echo "  - ${{ github.event.release.tag_name }}"
+          echo "  - latest"
+          echo "🔗 Release: ${{ github.event.release.html_url }}"
+        else
+          echo "  - manual-${{ github.sha }}"
+          echo "  - latest"
+          echo "🚀 Déclenché manuellement"
+        fi
