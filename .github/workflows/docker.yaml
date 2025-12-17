@@ -3,9 +3,6 @@ name: Build & Push Docker
 on:
   release:
     types: [published]
-  push:
-    branches: [main]
-    tags: ['v*']
 
 jobs:
   build:
@@ -41,7 +38,7 @@ jobs:
         push: true
         tags: |
           ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:latest
-          ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:${{ github.sha }}
+          ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:${{ github.event.release.tag_name }}
         # Ajouter le build-arg si nécessaire
         build-args: |
           NODE_ENV=production
@@ -49,5 +46,6 @@ jobs:
     - name: Success notification
       run: |
         echo "✅ IMAGE DOCKER PUBLIÉE"
-        echo "📦 Tags: latest, ${{ github.sha }}"
+        echo "🏷️ Version: ${{ github.event.release.tag_name }}"
+        echo "📦 Tags: latest, ${{ github.event.release.tag_name }}"
         echo "👤 Utilisateur: ${{ secrets.DOCKER_USERNAME }}"
