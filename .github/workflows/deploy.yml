@@ -20,40 +20,20 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     
-    - name: Fix CSS paths in HTML
+    - name: Ensure JS works on GitHub Pages
       run: |
-        echo "🔧 Vérification des liens CSS..."
+        echo "🔧 Configuration pour GitHub Pages..."
         
+        # Juste corriger les slashs initiaux
         if [ -f "public/index.html" ]; then
-          # S'assurer que les liens CSS sont corrects
-          echo "📄 Correction de index.html..."
-          
-          # Remplacer les chemins absolus par relatifs
-          sed -i 's|href="/css/|href="css/|g' public/index.html
-          
-          # S'assurer que les deux CSS sont liés
-          if ! grep -q "responsive.css" public/index.html; then
-            echo "➕ Ajout de responsive.css..."
-            sed -i '/style.css/ a\    <link rel="stylesheet" href="css/responsive.css">' public/index.html
-          fi
-          
-          echo "✅ Liens CSS configurés:"
-          grep -i "href.*css" public/index.html
-        else
-          echo "❌ public/index.html manquant"
-          exit 1
+          echo "Fixing paths in index.html..."
+          sed -i.bak 's|="/|="|g' public/index.html
         fi
         
+        # Vérifier les fichiers
         echo ""
-        echo "📁 Structure CSS:"
-        if [ -d "public/css" ]; then
-          find public/css -name "*.css" | sed 's/^/  📄 /'
-        else
-          echo "  ❌ Dossier css/ manquant"
-          mkdir -p public/css
-          touch public/css/style.css public/css/responsive.css
-          echo "  ✅ Dossier css/ créé avec fichiers vides"
-        fi
+        echo "📊 Fichiers présents:"
+        ls -la public/ 2>/dev/null || echo "Dossier public/ vide"
     
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -67,14 +47,15 @@ jobs:
       id: deployment
       uses: actions/deploy-pages@v4
     
-    - name: Verify CSS deployment
+    - name: Success message
       run: |
-        echo "✅ SITE DÉPLOYÉ !"
+        echo "🎉 DÉPLOIEMENT RÉUSSI !"
+        echo "🔗 ${{ steps.deployment.outputs.page_url }}"
         echo ""
-        echo "🎨 VOTRE CSS EST MAINTENANT DISPONIBLE:"
+        echo "Votre JavaScript devrait fonctionner car:"
+        echo "• Les chemins ont été corrigés"
+        echo "• GitHub Pages sert les fichiers statiques"
         echo ""
-        echo "1. style.css → ${{ steps.deployment.outputs.page_url }}css/style.css"
-        echo "2. responsive.css → ${{ steps.deployment.outputs.page_url }}css/responsive.css"
-        echo ""
-        echo "🔗 Accès direct au site:"
-        echo "${{ steps.deployment.outputs.page_url }}"
+        echo "Si le JS ne marche pas, vérifiez:"
+        echo "1. Les chemins dans index.html"
+        echo "2. La console navigateur (F12)"
