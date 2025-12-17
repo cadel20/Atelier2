@@ -13,6 +13,22 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     
+    # Vérification des secrets Docker
+    - name: Validate Docker secrets
+      run: |
+        echo "🔍 Vérification des secrets Docker..."
+        if [ -z "${{ secrets.DOCKER_USERNAME }}" ]; then
+          echo "❌ ERREUR: DOCKER_USERNAME non configuré"
+          echo "Configurez le secret DOCKER_USERNAME dans GitHub"
+          exit 1
+        fi
+        if [ -z "${{ secrets.DOCKER_PASSWORD }}" ]; then
+          echo "❌ ERREUR: DOCKER_PASSWORD non configuré"
+          echo "Configurez le secret DOCKER_PASSWORD dans GitHub"
+          exit 1
+        fi
+        echo "✅ Secrets Docker configurés"
+    
     # Vérification minimale
     - name: Check public directory
       run: |
@@ -40,10 +56,6 @@ jobs:
         tags: |
           ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:latest
           ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:${{ github.event.release.tag_name }}
-          ${{ secrets.DOCKER_USERNAME }}/atelier-cicd:${{ github.sha }}
-        # Ajouter le build-arg si nécessaire
-        build-args: |
-          NODE_ENV=production
     
     - name: Success notification
       run: |
@@ -52,3 +64,4 @@ jobs:
         echo "🏷️ Version: ${{ github.event.release.tag_name }}"
         echo "🔗 Release: ${{ github.event.release.html_url }}"
         echo "📦 Image: ${{ secrets.DOCKER_USERNAME }}/atelier-cicd"
+        echo "🐳 Tags: latest, ${{ github.event.release.tag_name }}"
